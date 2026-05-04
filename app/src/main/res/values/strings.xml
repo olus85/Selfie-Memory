@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Selfie-Memory</string>
+    <string name="gallery_title">Gallery</string>
+    <string name="settings_title">Settings</string>
+    <string name="empty_gallery">No selfies yet</string>
+    <string name="capture_notification_channel">Selfie Capture</string>
+    <string name="capture_notification_title">Selfie-Memory Active</string>
+    <string name="capture_notification_text">Tap to open app • Swipe away to stop</string>
+    <string name="permission_camera">Camera permission required</string>
+    <string name="permission_location">Location permission required</string>
+</resources>

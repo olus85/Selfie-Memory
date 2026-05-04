@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android Studio
+*.iml
+.idea/
+local.properties
+
+# Build outputs
+*.apk
+*.ap_
+*.aab
+app/build/
+
+# Git
+.git/
+.gitignore
