@@ -99,9 +99,11 @@ fun ViewerScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        selfie?.let { viewModel.deleteSelfie(it) }
-                        showDeleteDialog = false
-                        onNavigateBack()
+                        selfie?.let {
+                            viewModel.deleteSelfie(it)
+                            showDeleteDialog = false
+                            onNavigateBack()
+                        }
                     }
                 ) {
                     Text("Delete")

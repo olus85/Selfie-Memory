@@ -15,13 +15,11 @@ abstract class SelfieDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): SelfieDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     SelfieDatabase::class.java,
                     "selfie_database"
-                ).build()
-                INSTANCE = instance
-                instance
+                ).build().also { INSTANCE = it }
             }
         }
     }

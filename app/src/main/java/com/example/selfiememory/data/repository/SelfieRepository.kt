@@ -9,6 +9,9 @@ import com.example.selfiememory.domain.model.Selfie
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -19,6 +22,8 @@ class SelfieRepository(
     private val context: Context,
     private val selfieDao: SelfieDao
 ) {
+    private val mutex = Mutex()
+
     fun getAllSelfies(): Flow<List<Selfie>> {
         return selfieDao.getAllSelfies().map { entities ->
             entities.map { it.toDomain() }
@@ -31,28 +36,33 @@ class SelfieRepository(
             val fileName = "selfie_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(timestamp))}.jpg"
             val file = File(context.filesDir, fileName)
 
-            FileOutputStream(file).use { fos ->
-                fos.write(imageBytes)
+            try {
+                FileOutputStream(file).use { fos ->
+                    fos.write(imageBytes)
+                }
+
+                val entity = SelfieEntity(
+                    timestamp = timestamp,
+                    filePath = file.absolutePath,
+                    latitude = latitude,
+                    longitude = longitude
+                )
+
+                val id = selfieDao.insert(entity).toInt()
+                entity.copy(id = id).toDomain()
+            } catch (e: Exception) {
+                file.delete()
+                throw e
             }
-
-            val entity = SelfieEntity(
-                timestamp = timestamp,
-                filePath = file.absolutePath,
-                latitude = latitude,
-                longitude = longitude
-            )
-
-            val id = selfieDao.insert(entity).toInt()
-            entity.copy(id = id).toDomain()
         }
     }
 
     suspend fun deleteSelfie(selfie: Selfie) {
         withContext(Dispatchers.IO) {
-            // Delete file
             val file = File(selfie.filePath)
-            if (file.exists()) file.delete()
-            // Delete DB entry
+            if (file.exists() && !file.delete()) {
+                throw IllegalStateException("Failed to delete file: ${selfie.filePath}")
+            }
             selfieDao.deleteById(selfie.id)
         }
     }
@@ -62,11 +72,19 @@ class SelfieRepository(
     suspend fun getOldestSelfies(limit: Int): List<Selfie> = selfieDao.getOldestSelfies(limit).map { it.toDomain() }
 
     suspend fun enforceDailyLimit(limit: Int, dayStart: Long) {
-        val count = getCountSince(dayStart)
-        if (count > limit) {
-            val toDelete = count - limit
-            val oldest = getOldestSelfies(toDelete)
-            oldest.forEach { deleteSelfie(it) }
+        mutex.withLock {
+            val count = getCountSince(dayStart)
+            if (count > limit) {
+                val toDelete = count - limit
+                val oldest = getOldestSelfies(toDelete)
+                oldest.forEach { selfie ->
+                    try {
+                        deleteSelfie(selfie)
+                    } catch (e: Exception) {
+                        // Log but continue deleting other oldest selfies
+                    }
+                }
+            }
         }
     }
 

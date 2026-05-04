@@ -11,6 +11,7 @@ import com.example.selfiememory.domain.model.NetworkMode
 import com.example.selfiememory.domain.model.Settings
 import com.example.selfiememory.service.SelfieCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -23,17 +24,27 @@ class SettingsViewModel @Inject constructor(
 ) : AndroidViewModel(application) {
 
     val settings: StateFlow<Settings> = MutableStateFlow(Settings())
+    private var serviceStartJob: Job? = null
 
     init {
         viewModelScope.launch {
             settingsRepository.settings.collect { s ->
                 (settings as MutableStateFlow).value = s
-                // For ANY_WLAN or CELLULAR mode, start the service
-                // For SPECIFIC_WLAN, we need to check SSID match - service handles this
                 if (s.networkMode != NetworkMode.SPECIFIC_WLAN || s.specificSsid.isNotBlank()) {
-                    startService()
+                    startServiceIfNotRunning()
                 }
             }
+        }
+    }
+
+    private fun startServiceIfNotRunning() {
+        val context = getApplication<Application>()
+        val activityManager = context.getSystemService(Application.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val runningServices = activityManager.getRunningServices(Integer.MAX_VALUE)
+        val isServiceRunning = runningServices.any { it.service.className == SelfieCaptureService::class.java.name }
+
+        if (!isServiceRunning) {
+            startService()
         }
     }
 

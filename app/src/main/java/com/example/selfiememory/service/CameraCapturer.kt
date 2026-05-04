@@ -29,6 +29,7 @@ class CameraCapturer @Inject constructor(
     }
 
     private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var cameraProvider: ProcessCameraProvider? = null
 
     suspend fun captureImage(
         lifecycleOwner: LifecycleOwner,
@@ -38,7 +39,7 @@ class CameraCapturer @Inject constructor(
 
         cameraProviderFuture.addListener({
             try {
-                val cameraProvider = cameraProviderFuture.get()
+                cameraProvider = cameraProviderFuture.get()
 
                 val cameraSelector = when (cameraType) {
                     CameraType.FRONT_ULTRA_WIDE -> CameraSelector.DEFAULT_FRONT_CAMERA
@@ -51,8 +52,8 @@ class CameraCapturer @Inject constructor(
                     .build()
 
                 try {
-                    cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
+                    cameraProvider?.unbindAll()
+                    cameraProvider?.bindToLifecycle(
                         lifecycleOwner,
                         cameraSelector,
                         imageCapture
@@ -73,26 +74,27 @@ class CameraCapturer @Inject constructor(
                             image.close()
 
                             Log.i(TAG, "Image captured successfully, size: ${bytes.size}")
-
-                            // Don't unbind here - let the lifecycle owner handle it
                             continuation.resume(bytes)
                         }
 
                         override fun onError(exception: ImageCaptureException) {
                             Log.e(TAG, "Capture failed", exception)
-                            // Don't call unbindAll in error callback - it crashes on main thread
+                            cameraProvider?.unbindAll()
                             continuation.resumeWithException(exception)
                         }
                     }
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Camera setup failed", e)
+                cameraProvider?.unbindAll()
                 continuation.resumeWithException(e)
             }
-        }, ContextCompat.getMainExecutor(context))
+        }, cameraExecutor)
     }
 
     fun shutdown() {
+        cameraProvider?.unbindAll()
+        cameraProvider = null
         cameraExecutor.shutdown()
     }
 }

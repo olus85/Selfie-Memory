@@ -5,7 +5,9 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import java.io.IOException
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -21,13 +23,23 @@ class SettingsDataStore(private val context: Context) {
         val LAST_CAPTURE_TIME = longPreferencesKey("last_capture_time")
     }
 
-    val networkMode: Flow<String> = context.dataStore.data.map { it[NETWORK_MODE] ?: "CELLULAR" }
-    val specificSsid: Flow<String> = context.dataStore.data.map { it[SPECIFIC_SSID] ?: "" }
-    val cameraType: Flow<String> = context.dataStore.data.map { it[CAMERA_TYPE] ?: "FRONT_ULTRA_WIDE" }
-    val captureDelay: Flow<Int> = context.dataStore.data.map { it[CAPTURE_DELAY] ?: 3 }
-    val cooldownMinutes: Flow<Int> = context.dataStore.data.map { it[COOLDOWN_MINUTES] ?: 10 }
-    val dailyLimit: Flow<Int> = context.dataStore.data.map { it[DAILY_LIMIT] ?: 10 }
-    val lastCaptureTime: Flow<Long> = context.dataStore.data.map { it[LAST_CAPTURE_TIME] ?: 0L }
+    private fun <T> Flow<Preferences>.safeMap(transform: (Preferences) -> T): Flow<T> = this
+        .catch { exception ->
+            if (exception is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw exception
+            }
+        }
+        .map(transform)
+
+    val networkMode: Flow<String> = context.dataStore.data.safeMap { it[NETWORK_MODE] ?: "CELLULAR" }
+    val specificSsid: Flow<String> = context.dataStore.data.safeMap { it[SPECIFIC_SSID] ?: "" }
+    val cameraType: Flow<String> = context.dataStore.data.safeMap { it[CAMERA_TYPE] ?: "FRONT_ULTRA_WIDE" }
+    val captureDelay: Flow<Int> = context.dataStore.data.safeMap { it[CAPTURE_DELAY] ?: 3 }
+    val cooldownMinutes: Flow<Int> = context.dataStore.data.safeMap { it[COOLDOWN_MINUTES] ?: 10 }
+    val dailyLimit: Flow<Int> = context.dataStore.data.safeMap { it[DAILY_LIMIT] ?: 10 }
+    val lastCaptureTime: Flow<Long> = context.dataStore.data.safeMap { it[LAST_CAPTURE_TIME] ?: 0L }
 
     suspend fun setNetworkMode(mode: String) { context.dataStore.edit { it[NETWORK_MODE] = mode } }
     suspend fun setSpecificSsid(ssid: String) { context.dataStore.edit { it[SPECIFIC_SSID] = ssid } }

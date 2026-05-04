@@ -1,5 +1,6 @@
 package com.example.selfiememory.ui.gallery
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -121,18 +122,36 @@ private fun SelfieThumbnail(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val file = File(selfie.filePath)
+    val fileExists = file.exists()
+
     Card(
         modifier = modifier
             .aspectRatio(1f)
             .padding(2.dp)
             .clickable(onClick = onClick)
     ) {
-        AsyncImage(
-            model = File(selfie.filePath),
-            contentDescription = "Selfie",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+        if (fileExists) {
+            AsyncImage(
+                model = file,
+                contentDescription = "Selfie",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.errorContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "!",
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.headlineMedium
+                )
+            }
+        }
     }
 }
 

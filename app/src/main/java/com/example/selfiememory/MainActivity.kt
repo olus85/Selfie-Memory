@@ -1,6 +1,7 @@
 package com.example.selfiememory
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -56,13 +57,18 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(Screen.Viewer.route) { backStackEntry ->
-                            val selfieId = backStackEntry.arguments?.getString("selfieId")?.toIntOrNull() ?: return@composable
-                            ViewerScreen(
-                                selfieId = selfieId,
-                                onNavigateBack = {
-                                    navController.popBackStack()
-                                }
-                            )
+                            val selfieId = backStackEntry.arguments?.getString("selfieId")?.toIntOrNull()
+                            if (selfieId == null) {
+                                Log.w("MainActivity", "Invalid selfieId, navigating back")
+                                navController.popBackStack()
+                            } else {
+                                ViewerScreen(
+                                    selfieId = selfieId,
+                                    onNavigateBack = {
+                                        navController.popBackStack()
+                                    }
+                                )
+                            }
                         }
                     }
                 }

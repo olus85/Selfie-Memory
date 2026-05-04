@@ -38,6 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import java.util.*
 import javax.inject.Inject
@@ -62,7 +63,7 @@ class SelfieCaptureService : LifecycleService() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var userPresentReceiver: BroadcastReceiver? = null
     private var captureJob: Job? = null
-    private var isMonitoring = false
+    private val isMonitoring = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
@@ -165,8 +166,7 @@ class SelfieCaptureService : LifecycleService() {
 
     @SuppressLint("MissingPermission")
     private fun startUserPresentMonitoring() {
-        if (isMonitoring) return
-        isMonitoring = true
+        if (!isMonitoring.compareAndSet(false, true)) return
 
         Log.i(TAG, "Starting USER_PRESENT monitoring")
 
@@ -191,7 +191,7 @@ class SelfieCaptureService : LifecycleService() {
             }
         }
         userPresentReceiver = null
-        isMonitoring = false
+        isMonitoring.set(false)
         Log.i(TAG, "Stopped USER_PRESENT monitoring")
     }
 
@@ -200,10 +200,13 @@ class SelfieCaptureService : LifecycleService() {
         captureJob = lifecycleScope.launch {
             try {
                 val settings = settingsRepository.settings.first()
-                val now = System.currentTimeMillis()
                 val dayStart = getDayStartMillis()
 
-                // Check network condition
+                if (!checkPermissions()) {
+                    Log.w(TAG, "Required permissions not granted, skipping capture")
+                    return@launch
+                }
+
                 val networkConditionMet = try {
                     networkMonitor.isConditionMetPublic(settings.networkMode, settings.specificSsid)
                 } catch (e: Exception) {
@@ -216,7 +219,7 @@ class SelfieCaptureService : LifecycleService() {
                     return@launch
                 }
 
-                // Check cooldown
+                val now = System.currentTimeMillis()
                 val lastCapture = settingsRepository.lastCaptureTime.first()
                 val cooldownMillis = settings.cooldownMinutes * 60 * 1000L
                 if (now - lastCapture < cooldownMillis) {
@@ -224,41 +227,40 @@ class SelfieCaptureService : LifecycleService() {
                     return@launch
                 }
 
-                // Check daily limit
                 val countToday = selfieRepository.getCountSince(dayStart)
                 if (countToday >= settings.dailyLimit) {
                     Log.i(TAG, "Daily limit reached ($countToday), skipping")
                     return@launch
                 }
 
-                // Wait for capture delay
                 Log.i(TAG, "Waiting ${settings.captureDelaySeconds}s before capture")
                 delay(settings.captureDelaySeconds * 1000L)
 
-                // Capture image
+                val captureTime = System.currentTimeMillis()
                 Log.i(TAG, "Starting capture with camera ${settings.cameraType}")
                 val imageBytes = cameraCapturer.captureImage(this@SelfieCaptureService, settings.cameraType)
 
-                // Get location
                 val location = getCurrentLocation()
                 val lat = location?.latitude
                 val lon = location?.longitude
                 Log.i(TAG, "Location: $lat, $lon")
 
-                // Save selfie
                 val selfie = selfieRepository.saveSelfie(imageBytes, lat, lon)
                 Log.i(TAG, "Selfie saved: ${selfie.id}")
 
-                // Update last capture time
-                settingsRepository.setLastCaptureTime(now)
+                settingsRepository.setLastCaptureTime(captureTime)
 
-                // Enforce daily limit (delete oldest if over limit)
                 selfieRepository.enforceDailyLimit(settings.dailyLimit, dayStart)
 
             } catch (e: Exception) {
                 Log.e(TAG, "Capture failed", e)
             }
         }
+    }
+
+    private fun checkPermissions(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
 
     @SuppressLint("MissingPermission")

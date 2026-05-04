@@ -21,9 +21,9 @@ class SettingsRepository(private val dataStore: SettingsDataStore) {
     ) { networkMode, ssid, cameraType, extras ->
         val (delay, cooldown, limit) = extras
         Settings(
-            networkMode = NetworkMode.valueOf(networkMode),
+            networkMode = runCatching { NetworkMode.valueOf(networkMode) }.getOrDefault(NetworkMode.CELLULAR),
             specificSsid = ssid,
-            cameraType = CameraType.valueOf(cameraType),
+            cameraType = runCatching { CameraType.valueOf(cameraType) }.getOrDefault(CameraType.FRONT_ULTRA_WIDE),
             captureDelaySeconds = delay,
             cooldownMinutes = cooldown,
             dailyLimit = limit

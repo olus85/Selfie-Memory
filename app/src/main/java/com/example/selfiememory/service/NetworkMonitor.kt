@@ -34,7 +34,7 @@ class NetworkMonitor @Inject constructor(
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 Log.i(TAG, "Network available")
-                trySend(isConditionMet(networkMode, specificSsid))
+                trySend(isConditionMetForNetwork(network, networkMode, specificSsid))
             }
 
             override fun onLost(network: Network) {
@@ -43,7 +43,7 @@ class NetworkMonitor @Inject constructor(
             }
 
             override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-                val met = isConditionMet(networkMode, specificSsid)
+                val met = isConditionMetForNetwork(network, networkMode, specificSsid)
                 Log.i(TAG, "Network capabilities changed, condition met: $met")
                 trySend(met)
             }
@@ -55,9 +55,7 @@ class NetworkMonitor @Inject constructor(
 
         connectivityManager.registerNetworkCallback(request, callback)
 
-        // Check initial state
-        val currentNetworks = connectivityManager.allNetworks
-        val initialMet = currentNetworks.any { isConditionMet(networkMode, specificSsid) }
+        val initialMet = connectivityManager.activeNetwork?.let { isConditionMetForNetwork(it, networkMode, specificSsid) } ?: false
         trySend(initialMet)
 
         awaitClose {
@@ -67,13 +65,13 @@ class NetworkMonitor @Inject constructor(
     }
 
     fun isConditionMetPublic(networkMode: NetworkMode, specificSsid: String): Boolean {
-        return isConditionMet(networkMode, specificSsid)
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        return isConditionMetForNetwork(activeNetwork, networkMode, specificSsid)
     }
 
     @SuppressLint("MissingPermission")
-    private fun isConditionMet(networkMode: NetworkMode, specificSsid: String): Boolean {
-        val activeNetwork = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+    private fun isConditionMetForNetwork(network: Network, networkMode: NetworkMode, specificSsid: String): Boolean {
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
 
         return when (networkMode) {
             NetworkMode.CELLULAR -> capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
