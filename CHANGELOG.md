@@ -2,6 +2,27 @@
 
 All notable changes to **Selfie-Memory** are documented here.
 
+## [1.2.0] - 2026-05-04
+
+### Added
+- **Saved WLAN SSID Dropdown**: Users can now select from their saved WiFi networks instead of typing SSIDs manually (Android Q+)
+
+### Changed
+- **Photo Storage Location**: Photos now saved to `/sdcard/Pictures/.SelfieMemory/` instead of internal app storage, preserving photos across reinstalls
+- **Storage Permissions**: Added WRITE_EXTERNAL_STORAGE permission for Android < Q
+
+### Fixed
+
+#### Critical Fixes
+- **Service Crash on Permission Denial**: Service now gracefully handles missing CAMERA permission by stopping itself instead of crashing
+- **Camera Thread Error**: Fixed `Not in application's main thread` error - `ProcessCameraProvider.unbindAll()` and `bindToLifecycle()` must run on main thread
+
+#### High Priority Fixes
+- **Service Auto-Start Prevention**: Service no longer starts automatically on app launch without user configuration. Only starts when user explicitly selects a network mode in settings
+- **Network Monitoring with `Any WLAN`**: Fixed service not starting when `Any WLAN` mode selected (previously only worked with `Specific WLAN`)
+
+---
+
 ## [1.1.0] - 2026-05-04
 
 ### Added
@@ -27,7 +48,7 @@ All notable changes to **Selfie-Memory** are documented here.
 - **SelfieDatabase Singleton**: Fixed double-checked locking pattern
 - **File Delete Error Handling**: `deleteSelfie()` now throws on file delete failure instead of silently ignoring
 - **Service Restart Prevention**: `SettingsViewModel` now checks if service is already running via `ActivityManager.getRunningServices()`
-- **Thread-Safe Monitoring Flag**: Changed `isMonitoring` to `AtomicBoolean` for proper thread safety
+- **Thread-Safe Monitoring Flag**: Changed `isMonitoring` to `AtomicBoolean` for thread safety
 - **Gallery File Existence Check**: Shows error indicator when image file is missing
 - **BootReceiver Protection**: Added `android:protectionLevel="signature"` to prevent other apps from triggering
 - **Missing Import**: Added `Box` and `background` imports to `GalleryScreen.kt`
@@ -35,10 +56,6 @@ All notable changes to **Selfie-Memory** are documented here.
 #### Low Priority Fixes
 - **Invalid SelfieId Handling**: `MainActivity` now logs warning and navigates back when selfieId is invalid
 - **Camera Shutdown Cleanup**: `shutdown()` now calls `unbindAll()` before terminating executor
-
-### Changed
-- Moved `captureTime` calculation to immediately before the actual image capture for accuracy
-- Improved logging in `NetworkMonitor` to show current vs expected SSID
 
 ### Security
 - BootReceiver now requires signature-level permission to prevent spoofing
