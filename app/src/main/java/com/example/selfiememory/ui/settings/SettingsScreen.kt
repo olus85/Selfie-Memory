@@ -1,6 +1,8 @@
 package com.example.selfiememory.ui.settings
 
 import android.Manifest
+import android.content.Context
+import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,6 +31,14 @@ fun SettingsScreen(
     val settings by viewModel.settings.collectAsState()
     val context = LocalContext.current
     var hasPermissions by remember { mutableStateOf(false) }
+    val wifiManager = remember { context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager }
+
+    val savedSsids = remember {
+        wifiManager.configuredNetworks
+            ?.mapNotNull { it.SSID?.removeSurrounding("\"")?.takeIf { s -> s.isNotBlank() } }
+            ?.distinct()
+            ?: emptyList()
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -108,13 +119,52 @@ fun SettingsScreen(
                     }
 
                     if (settings.networkMode == NetworkMode.SPECIFIC_WLAN) {
-                        OutlinedTextField(
-                            value = settings.specificSsid,
-                            onValueChange = { viewModel.setSpecificSsid(it) },
-                            label = { Text("WLAN SSID") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
+                        if (savedSsids.isEmpty()) {
+                            OutlinedTextField(
+                                value = settings.specificSsid,
+                                onValueChange = { viewModel.setSpecificSsid(it) },
+                                label = { Text("WLAN SSID") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                        } else {
+                            var expanded by remember { mutableStateOf(false) }
+                            ExposedDropdownMenuBox(
+                                expanded = expanded,
+                                onExpandedChange = { expanded = it }
+                            ) {
+                                OutlinedTextField(
+                                    value = settings.specificSsid.ifBlank { "Select a saved network" },
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("WLAN SSID") },
+                                    trailingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropDown,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .menuAnchor(),
+                                    singleLine = true
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false }
+                                ) {
+                                    savedSsids.forEach { ssid ->
+                                        DropdownMenuItem(
+                                            text = { Text(ssid) },
+                                            onClick = {
+                                                viewModel.setSpecificSsid(ssid)
+                                                expanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
