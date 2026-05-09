@@ -6,12 +6,14 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Log
 import com.example.selfiememory.domain.model.NetworkMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import javax.inject.Inject
@@ -23,6 +25,8 @@ class NetworkMonitor @Inject constructor(
 ) {
     companion object {
         private const val TAG = "NetworkMonitor"
+        private const val SSID_RETRY_DELAY_MS = 500L
+        private const val SSID_RETRY_COUNT = 3
     }
 
     private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -80,11 +84,51 @@ class NetworkMonitor @Inject constructor(
                 if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return false
                 if (specificSsid.isBlank()) return true
 
-                val wifiInfo = wifiManager.connectionInfo
-                val currentSsid = wifiInfo?.ssid?.removeSurrounding("\"") ?: ""
-                Log.i(TAG, "Current SSID: $currentSsid, Expected: $specificSsid")
-                currentSsid == specificSsid
+                // Verify this is the active network to avoid stale SSID info from other networks
+                val activeNetwork = connectivityManager.activeNetwork
+                if (network != activeNetwork) {
+                    Log.i(TAG, "Network is not the active network, ignoring SSID check")
+                    return false
+                }
+
+                val ssid = getCurrentSsidWithRetry()
+                Log.i(TAG, "Current SSID: $ssid, Expected: $specificSsid")
+                ssid == specificSsid
             }
+        }
+    }
+
+    /**
+     * Gets the current SSID with retry logic to handle propagation delay.
+     * On some devices, the SSID may be null or empty immediately after connecting.
+     */
+    @SuppressLint("MissingPermission")
+    private fun getCurrentSsidWithRetry(): String {
+        repeat(SSID_RETRY_COUNT) { attempt ->
+            val ssid = getCurrentSsid()
+            if (ssid.isNotEmpty()) {
+                return ssid
+            }
+            if (attempt < SSID_RETRY_COUNT - 1) {
+                Log.i(TAG, "SSID is empty/null, retrying ($attempt + 1/$SSID_RETRY_COUNT)...")
+                Thread.sleep(SSID_RETRY_DELAY_MS)
+            }
+        }
+        return getCurrentSsid()
+    }
+
+    /**
+     * Gets the current SSID from the WiFi info.
+     * Uses the non-deprecated API where available.
+     */
+    @Suppress("DEPRECATION")
+    private fun getCurrentSsid(): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // On API 33+, try to get SSID from the connectionInfo which is still the most reliable way
+            // despite the deprecation warning. The replacement APIs are significantly more complex.
+            wifiManager.connectionInfo?.ssid?.removeSurrounding("\"") ?: ""
+        } else {
+            wifiManager.connectionInfo?.ssid?.removeSurrounding("\"") ?: ""
         }
     }
 }

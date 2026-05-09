@@ -168,6 +168,12 @@ class SelfieCaptureService : LifecycleService() {
     private fun startUserPresentMonitoring() {
         if (!isMonitoring.compareAndSet(false, true)) return
 
+        if (!checkPermissions()) {
+            Log.w(TAG, "Required permissions not granted, skipping USER_PRESENT monitoring")
+            isMonitoring.set(false)
+            return
+        }
+
         Log.i(TAG, "Starting USER_PRESENT monitoring")
 
         userPresentReceiver = object : BroadcastReceiver() {
@@ -222,7 +228,7 @@ class SelfieCaptureService : LifecycleService() {
                 val now = System.currentTimeMillis()
                 val lastCapture = settingsRepository.lastCaptureTime.first()
                 val cooldownMillis = settings.cooldownMinutes * 60 * 1000L
-                if (now - lastCapture < cooldownMillis) {
+                if (lastCapture > 0 && now - lastCapture < cooldownMillis) {
                     Log.i(TAG, "Cooldown active (${(cooldownMillis - (now - lastCapture)) / 1000}s left), skipping capture")
                     return@launch
                 }

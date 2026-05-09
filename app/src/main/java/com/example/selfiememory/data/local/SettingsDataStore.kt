@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.selfiememory.domain.model.CameraType
+import com.example.selfiememory.domain.model.NetworkMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -33,9 +35,15 @@ class SettingsDataStore(private val context: Context) {
         }
         .map(transform)
 
-    val networkMode: Flow<String> = context.dataStore.data.safeMap { it[NETWORK_MODE] ?: "CELLULAR" }
+    val networkMode: Flow<String> = context.dataStore.data.safeMap {
+        runCatching { NetworkMode.valueOf(it[NETWORK_MODE] ?: "") }
+            .getOrDefault(NetworkMode.CELLULAR).name
+    }
     val specificSsid: Flow<String> = context.dataStore.data.safeMap { it[SPECIFIC_SSID] ?: "" }
-    val cameraType: Flow<String> = context.dataStore.data.safeMap { it[CAMERA_TYPE] ?: "FRONT_ULTRA_WIDE" }
+    val cameraType: Flow<String> = context.dataStore.data.safeMap {
+        runCatching { CameraType.valueOf(it[CAMERA_TYPE] ?: "") }
+            .getOrDefault(CameraType.FRONT_ULTRA_WIDE).name
+    }
     val captureDelay: Flow<Int> = context.dataStore.data.safeMap { it[CAPTURE_DELAY] ?: 3 }
     val cooldownMinutes: Flow<Int> = context.dataStore.data.safeMap { it[COOLDOWN_MINUTES] ?: 10 }
     val dailyLimit: Flow<Int> = context.dataStore.data.safeMap { it[DAILY_LIMIT] ?: 10 }

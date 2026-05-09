@@ -2,6 +2,30 @@
 
 All notable changes to **Selfie-Memory** are documented here.
 
+## [1.3.0] - 2026-05-09
+
+### Fixed
+
+#### Critical Fixes
+- **SettingsViewModel Redundant Service Starts**: Removed automatic service start from settings collector. Service is now only started via explicit user action, not on every settings change. This prevents excessive battery drain from repeated service restarts.
+- **BootReceiver No Configuration Validation**: BootReceiver now uses `goAsync()` with coroutine to check DataStore settings before starting service. Service only starts if a valid network mode configuration exists, preventing blind service starts after boot.
+- **USER_PRESENT Receiver Registration Before Permission Check**: Moved permission check before receiver registration in `startUserPresentMonitoring()`. Receiver is now only registered if CAMERA and ACCESS_FINE_LOCATION permissions are granted.
+
+#### High Priority Fixes
+- **NetworkMonitor Trigger Logic**: Added SSID retry logic (500ms delay, 3 retries) to handle WiFi SSID propagation delays. Added active network validation to prevent stale SSID data from triggering incorrect results.
+- **Cooldown Time Calculation**: Fixed cooldown block on first capture by adding `lastCapture > 0` check. First capture (when lastCapture is 0) is now never blocked by cooldown.
+- **Daily Limit Race Condition**: Wrapped entire count-check-and-delete operation in `withContext(Dispatchers.IO)` inside the mutex lock to ensure atomicity of database modifications.
+
+#### Medium Priority Fixes
+- **Enum Parsing Crash**: Added `runCatching` validation in SettingsDataStore for NetworkMode and CameraType enum parsing to handle corrupt/invalid stored values gracefully.
+- **ImageProxy Memory Leak**: Changed `image.close()` to `image.use {}` block to ensure ImageProxy is always closed even if exceptions occur during buffer processing.
+- **Storage Leak / File Orphaning**: Added `cleanupOrphanedFiles()` method to SelfieRepository that scans storage directory for orphaned files not in database and deletes them. Integrated into Application.onCreate() for startup cleanup. Also improved error logging in enforceDailyLimit.
+
+#### Low Priority Fixes
+- **ViewerViewModel ExperimentalCoroutinesApi**: Added `@OptIn(ExperimentalCoroutinesApi::class)` annotation for `flatMapLatest` usage.
+
+---
+
 ## [1.2.0] - 2026-05-04
 
 ### Added

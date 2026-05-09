@@ -3,6 +3,7 @@ package com.example.selfiememory.data.repository
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import com.example.selfiememory.data.local.SelfieDao
 import com.example.selfiememory.data.local.SelfieEntity
 import com.example.selfiememory.domain.model.Selfie
@@ -23,6 +24,12 @@ class SelfieRepository(
     private val selfieDao: SelfieDao
 ) {
     private val mutex = Mutex()
+
+    companion object {
+        private const val TAG = "SelfieRepository"
+        private const val SELFIE_PREFIX = "selfie_"
+        private const val SELFIE_EXTENSION = ".jpg"
+    }
 
     fun getAllSelfies(): Flow<List<Selfie>> {
         return selfieDao.getAllSelfies().map { entities ->
@@ -77,11 +84,39 @@ class SelfieRepository(
             if (count > limit) {
                 val toDelete = count - limit
                 val oldest = getOldestSelfies(toDelete)
-                oldest.forEach { selfie ->
-                    try {
-                        deleteSelfie(selfie)
-                    } catch (e: Exception) {
-                        // Log but continue deleting other oldest selfies
+                withContext(Dispatchers.IO) {
+                    oldest.forEach { selfie ->
+                        try {
+                            val file = File(selfie.filePath)
+                            if (file.exists() && !file.delete()) {
+                                throw IllegalStateException("Failed to delete file: ${selfie.filePath}")
+                            }
+                            selfieDao.deleteById(selfie.id)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to delete selfie during enforceDailyLimit: ${selfie.id}", e)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Cleans up orphaned files that exist in the storage directory but are not
+     * referenced in the database. Call this at app startup.
+     */
+    suspend fun cleanupOrphanedFiles() {
+        withContext(Dispatchers.IO) {
+            val dbPaths = selfieDao.getAllSelfies().first().map { it.filePath }.toSet()
+            val storageDir = context.filesDir
+
+            storageDir.listFiles()?.forEach { file ->
+                if (file.name.startsWith(SELFIE_PREFIX) && file.name.endsWith(SELFIE_EXTENSION)) {
+                    if (file.absolutePath !in dbPaths) {
+                        Log.w(TAG, "Found orphaned file, deleting: ${file.absolutePath}")
+                        if (!file.delete()) {
+                            Log.e(TAG, "Failed to delete orphaned file: ${file.absolutePath}")
+                        }
                     }
                 }
             }

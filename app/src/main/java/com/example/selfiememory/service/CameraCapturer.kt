@@ -68,13 +68,13 @@ class CameraCapturer @Inject constructor(
                     cameraExecutor,
                     object : ImageCapture.OnImageCapturedCallback() {
                         override fun onCaptureSuccess(image: ImageProxy) {
-                            val buffer = image.planes[0].buffer
-                            val bytes = ByteArray(buffer.remaining())
-                            buffer.get(bytes)
-                            image.close()
-
-                            Log.i(TAG, "Image captured successfully, size: ${bytes.size}")
-                            continuation.resume(bytes)
+                            image.use {
+                                val buffer = it.planes[0].buffer
+                                val bytes = ByteArray(buffer.remaining())
+                                buffer.get(bytes)
+                                Log.i(TAG, "Image captured successfully, size: ${bytes.size}")
+                                continuation.resume(bytes)
+                            }
                         }
 
                         override fun onError(exception: ImageCaptureException) {
