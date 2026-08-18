@@ -14,6 +14,9 @@ local.properties
 *.aab
 app/build/
 
+# Local device backups and test captures (never commit personal photos)
+.device-backups/
+
 # Git
 .git/
 .gitignore

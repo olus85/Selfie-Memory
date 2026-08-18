@@ -1,26 +1,29 @@
 package com.example.selfiememory.ui.settings
 
 import android.Manifest
-import android.content.Context
-import android.net.wifi.WifiManager
 import android.os.Build
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.selfiememory.domain.model.CameraType
 import com.example.selfiememory.domain.model.NetworkMode
+import com.example.selfiememory.service.SelfieCaptureService
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,21 +32,21 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
+    val availableSsids by viewModel.availableSsids.collectAsState()
     val context = LocalContext.current
     var hasPermissions by remember { mutableStateOf(false) }
-    val wifiManager = remember { context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager }
-
-    val savedSsids = remember {
-        wifiManager.configuredNetworks
-            ?.mapNotNull { it.SSID?.removeSurrounding("\"")?.takeIf { s -> s.isNotBlank() } }
-            ?.distinct()
-            ?: emptyList()
-    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         hasPermissions = permissions.values.all { it }
+        if (hasPermissions) {
+            viewModel.refreshAvailableSsids()
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, SelfieCaptureService::class.java).setAction(SelfieCaptureService.ACTION_START)
+            )
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -86,7 +89,7 @@ fun SettingsScreen(
                     Text("Permissions", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = if (hasPermissions) "✓ All permissions granted" else "⚠ Some permissions missing",
+                        text = if (hasPermissions) "All permissions granted" else "Some permissions missing",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -95,7 +98,19 @@ fun SettingsScreen(
             // Network Trigger
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Network Trigger", style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Network Trigger", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.weight(1f))
+                        IconButton(onClick = { viewModel.refreshAvailableSsids() }) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Refresh networks"
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
 
                     NetworkMode.entries.forEach { mode ->
@@ -119,44 +134,52 @@ fun SettingsScreen(
                     }
 
                     if (settings.networkMode == NetworkMode.SPECIFIC_WLAN) {
-                        if (savedSsids.isEmpty()) {
+                        var expanded by remember { mutableStateOf(false) }
+                        val displaySsids = if (availableSsids.isEmpty()) {
+                            listOf(settings.specificSsid).filter { it.isNotBlank() }
+                        } else {
+                            availableSsids
+                        }
+
+                        ExposedDropdownMenuBox(
+                            expanded = expanded,
+                            onExpandedChange = { expanded = it }
+                        ) {
                             OutlinedTextField(
-                                value = settings.specificSsid,
-                                onValueChange = { viewModel.setSpecificSsid(it) },
+                                value = settings.specificSsid.ifBlank { "Select a network" },
+                                onValueChange = {},
+                                readOnly = true,
                                 label = { Text("WLAN SSID") },
-                                modifier = Modifier.fillMaxWidth(),
+                                trailingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = null
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(),
                                 singleLine = true
                             )
-                        } else {
-                            var expanded by remember { mutableStateOf(false) }
-                            ExposedDropdownMenuBox(
+                            ExposedDropdownMenu(
                                 expanded = expanded,
-                                onExpandedChange = { expanded = it }
+                                onDismissRequest = { expanded = false }
                             ) {
-                                OutlinedTextField(
-                                    value = settings.specificSsid.ifBlank { "Select a saved network" },
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text("WLAN SSID") },
-                                    trailingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.ArrowDropDown,
-                                            contentDescription = null
-                                        )
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .menuAnchor(),
-                                    singleLine = true
-                                )
-                                ExposedDropdownMenu(
-                                    expanded = expanded,
-                                    onDismissRequest = { expanded = false }
-                                ) {
-                                    savedSsids.forEach { ssid ->
+                                if (displaySsids.isEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text("No networks found") },
+                                        onClick = { expanded = false },
+                                        enabled = false
+                                    )
+                                } else {
+                                    displaySsids.forEach { ssid ->
                                         DropdownMenuItem(
                                             text = { Text(ssid) },
                                             onClick = {
+                                                viewModel.setSpecificSsid(ssid)
+                                                expanded = false
+                                            },
+                                            modifier = Modifier.clickable {
                                                 viewModel.setSpecificSsid(ssid)
                                                 expanded = false
                                             }
@@ -164,6 +187,15 @@ fun SettingsScreen(
                                     }
                                 }
                             }
+                        }
+
+                        if (displaySsids.isEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "No WiFi networks detected. Make sure location permission is granted and WiFi is enabled.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }

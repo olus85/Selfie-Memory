@@ -20,7 +20,7 @@ class SelfieMemoryApp : Application() {
     override fun onCreate() {
         super.onCreate()
         applicationScope.launch(Dispatchers.IO) {
-            selfieRepository.cleanupOrphanedFiles()
+            selfieRepository.reconcileAndPublishPhotos()
         }
     }
 }

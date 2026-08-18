@@ -4,9 +4,14 @@
     <string name="gallery_title">Gallery</string>
     <string name="settings_title">Settings</string>
     <string name="empty_gallery">No selfies yet</string>
-    <string name="capture_notification_channel">Selfie Capture</string>
-    <string name="capture_notification_title">Selfie-Memory Active</string>
-    <string name="capture_notification_text">Tap to open app • Swipe away to stop</string>
+    <string name="capture_notification_channel">Automatische Erinnerungen</string>
+    <string name="capture_notification_channel_description">Wartet auf das Entsperren und erstellt nur passende Erinnerungen</string>
+    <string name="capture_notification_title">Selfie Memory ist bereit</string>
+    <string name="capture_notification_text">Dunkle Taschenbilder werden automatisch verworfen</string>
+    <string name="reactivate_channel">Nach Neustart reaktivieren</string>
+    <string name="reactivate_title">Selfie Memory reaktivieren</string>
+    <string name="reactivate_text">Einmal tippen, damit Android die Kamera-Automatik wieder freigibt</string>
+    <string name="stop">Stoppen</string>
     <string name="permission_camera">Camera permission required</string>
     <string name="permission_location">Location permission required</string>
 </resources>

@@ -10,9 +10,9 @@ import kotlinx.coroutines.flow.combine
 class SettingsRepository(private val dataStore: SettingsDataStore) {
 
     val settings: Flow<Settings> = combine(
-        dataStore.networkMode,
+        dataStore.networkModeFlow,
         dataStore.specificSsid,
-        dataStore.cameraType,
+        dataStore.cameraTypeFlow,
         combine(
             dataStore.captureDelay,
             dataStore.cooldownMinutes,

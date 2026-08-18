@@ -15,10 +15,6 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.Build
 import android.util.Log
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -38,19 +34,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.coroutines.resume
-import java.util.*
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Calendar
 import javax.inject.Inject
+import kotlin.coroutines.resume
 
 @AndroidEntryPoint
 class SelfieCaptureService : LifecycleService() {
-
     companion object {
         private const val TAG = "SelfieCaptureService"
         private const val CHANNEL_ID = "selfie_capture_channel"
         private const val NOTIFICATION_ID = 1001
-
         const val ACTION_START = "com.example.selfiememory.START_CAPTURE_SERVICE"
         const val ACTION_STOP = "com.example.selfiememory.STOP_CAPTURE_SERVICE"
     }
@@ -59,41 +53,46 @@ class SelfieCaptureService : LifecycleService() {
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var networkMonitor: NetworkMonitor
     @Inject lateinit var cameraCapturer: CameraCapturer
+    @Inject lateinit var pocketDetector: PocketDetector
+    @Inject lateinit var imageQualityAnalyzer: ImageQualityAnalyzer
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var userPresentReceiver: BroadcastReceiver? = null
     private var captureJob: Job? = null
-    private val isMonitoring = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
-        Log.i(TAG, "Service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-
-        when (intent?.action) {
-            ACTION_STOP -> {
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            ACTION_START, null -> {
-                startForegroundWithProperType()
-                startUserPresentMonitoring()
-            }
+        if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
         }
-
-        return START_STICKY
+        if (!hasCameraPermission()) {
+            Log.w(TAG, "Camera permission missing; service will not start")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        return try {
+            startForegroundSafely()
+            registerUnlockReceiver()
+            START_NOT_STICKY
+        } catch (error: SecurityException) {
+            // Android 14+ rejects camera FGS starts from disallowed background states.
+            Log.e(TAG, "Camera foreground service start rejected", error)
+            stopSelf()
+            START_NOT_STICKY
+        }
     }
 
-    private fun startForegroundWithProperType() {
+    @SuppressLint("InlinedApi")
+    private fun startForegroundSafely() {
         val notification = createNotification()
-
         if (Build.VERSION.SDK_INT >= 34) {
-            // Android 14+ requires explicit foreground service type
             ServiceCompat.startForeground(
                 this,
                 NOTIFICATION_ID,
@@ -101,216 +100,132 @@ class SelfieCaptureService : LifecycleService() {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             )
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            )
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
     }
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            getString(R.string.capture_notification_channel),
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Selfie capture service - runs when device is unlocked"
-            setShowBadge(false)
-            setBypassDnd(false)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                setAllowBubbles(false)
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.capture_notification_channel),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = getString(R.string.capture_notification_channel_description)
+                setShowBadge(false)
             }
-        }
-
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.createNotificationChannel(channel)
+        )
     }
 
     private fun createNotification(): Notification {
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
+        val openApp = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
-        val stopIntent = Intent(this, SelfieCaptureService::class.java).apply {
-            action = ACTION_STOP
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this,
-            1,
-            stopIntent,
+        val stop = PendingIntent.getService(
+            this, 1, Intent(this, SelfieCaptureService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.capture_notification_title))
             .setContentText(getString(R.string.capture_notification_text))
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(openApp)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Stop",
-                stopPendingIntent
-            )
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.stop), stop)
             .build()
     }
 
-    @SuppressLint("MissingPermission")
-    private fun startUserPresentMonitoring() {
-        if (!isMonitoring.compareAndSet(false, true)) return
-
-        if (!checkPermissions()) {
-            Log.w(TAG, "Required permissions not granted, skipping USER_PRESENT monitoring")
-            isMonitoring.set(false)
-            return
-        }
-
-        Log.i(TAG, "Starting USER_PRESENT monitoring")
-
+    private fun registerUnlockReceiver() {
+        if (userPresentReceiver != null) return
         userPresentReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                Log.i(TAG, "USER_PRESENT received, checking conditions...")
-                checkAndCapture()
+                if (intent?.action == Intent.ACTION_USER_PRESENT) captureAfterUnlock()
             }
         }
-
-        val filter = IntentFilter(Intent.ACTION_USER_PRESENT)
-
-        registerReceiver(userPresentReceiver, filter)
+        ContextCompat.registerReceiver(
+            this,
+            userPresentReceiver,
+            IntentFilter(Intent.ACTION_USER_PRESENT),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        Log.i(TAG, "Unlock monitoring active")
     }
 
-    private fun stopUserPresentMonitoring() {
-        userPresentReceiver?.let {
-            try {
-                unregisterReceiver(it)
-            } catch (e: Exception) {
-                Log.w(TAG, "Receiver not registered", e)
-            }
-        }
-        userPresentReceiver = null
-        isMonitoring.set(false)
-        Log.i(TAG, "Stopped USER_PRESENT monitoring")
-    }
-
-    private fun checkAndCapture() {
-        captureJob?.cancel()
+    private fun captureAfterUnlock() {
+        if (captureJob?.isActive == true) return
         captureJob = lifecycleScope.launch {
             try {
                 val settings = settingsRepository.settings.first()
-                val dayStart = getDayStartMillis()
-
-                if (!checkPermissions()) {
-                    Log.w(TAG, "Required permissions not granted, skipping capture")
-                    return@launch
-                }
-
-                val networkConditionMet = try {
-                    networkMonitor.isConditionMetPublic(settings.networkMode, settings.specificSsid)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Network condition check failed", e)
-                    false
-                }
-
-                if (!networkConditionMet) {
-                    Log.i(TAG, "Network condition not met, skipping capture")
-                    return@launch
-                }
+                if (!hasCameraPermission()) return@launch
+                if (!networkMonitor.isConditionMetPublic(settings.networkMode, settings.specificSsid)) return@launch
 
                 val now = System.currentTimeMillis()
+                val cooldown = settings.cooldownMinutes * 60_000L
                 val lastCapture = settingsRepository.lastCaptureTime.first()
-                val cooldownMillis = settings.cooldownMinutes * 60 * 1000L
-                if (lastCapture > 0 && now - lastCapture < cooldownMillis) {
-                    Log.i(TAG, "Cooldown active (${(cooldownMillis - (now - lastCapture)) / 1000}s left), skipping capture")
+                if (lastCapture > 0 && now - lastCapture < cooldown) return@launch
+                val dayStart = getDayStartMillis()
+                if (selfieRepository.getCountSince(dayStart) >= settings.dailyLimit) return@launch
+
+                delay(settings.captureDelaySeconds * 1_000L)
+                // Conditions can change during the delay; do not photograph a pocket or wrong network.
+                if (!networkMonitor.isConditionMetPublic(settings.networkMode, settings.specificSsid)) return@launch
+                if (pocketDetector.isLikelyInPocket()) {
+                    Log.i(TAG, "Capture suppressed: proximity + darkness indicate pocket")
                     return@launch
                 }
 
-                val countToday = selfieRepository.getCountSince(dayStart)
-                if (countToday >= settings.dailyLimit) {
-                    Log.i(TAG, "Daily limit reached ($countToday), skipping")
+                val jpeg = cameraCapturer.captureImage(this@SelfieCaptureService, settings.cameraType)
+                val quality = imageQualityAnalyzer.analyze(jpeg)
+                if (!quality.accepted) {
+                    Log.i(TAG, "Discarded unusably dark frame")
                     return@launch
                 }
 
-                Log.i(TAG, "Waiting ${settings.captureDelaySeconds}s before capture")
-                delay(settings.captureDelaySeconds * 1000L)
-
-                val captureTime = System.currentTimeMillis()
-                Log.i(TAG, "Starting capture with camera ${settings.cameraType}")
-                val imageBytes = cameraCapturer.captureImage(this@SelfieCaptureService, settings.cameraType)
-
-                val location = getCurrentLocation()
-                val lat = location?.latitude
-                val lon = location?.longitude
-                Log.i(TAG, "Location: $lat, $lon")
-
-                val selfie = selfieRepository.saveSelfie(imageBytes, lat, lon)
-                Log.i(TAG, "Selfie saved: ${selfie.id}")
-
-                settingsRepository.setLastCaptureTime(captureTime)
-
+                val location = withTimeoutOrNull(2_500L) { getCurrentLocation() }
+                val selfie = selfieRepository.saveSelfie(jpeg, location?.latitude, location?.longitude)
+                settingsRepository.setLastCaptureTime(selfie.timestamp)
                 selfieRepository.enforceDailyLimit(settings.dailyLimit, dayStart)
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Capture failed", e)
+                Log.i(TAG, "Saved and published selfie ${selfie.id}")
+            } catch (error: Exception) {
+                Log.e(TAG, "Capture failed without stopping monitoring", error)
             }
         }
     }
 
-    private fun checkPermissions(): Boolean {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-    }
+    private fun hasCameraPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
     @SuppressLint("MissingPermission")
     private suspend fun getCurrentLocation(): Location? {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return null
         }
-
-        return try {
-            suspendCancellableCoroutine { continuation ->
-                val cancellationToken = CancellationTokenSource()
-                fusedLocationClient.getCurrentLocation(
-                    Priority.PRIORITY_HIGH_ACCURACY,
-                    cancellationToken.token
-                ).addOnSuccessListener { location ->
-                    continuation.resume(location)
-                }.addOnFailureListener { e ->
-                    Log.w(TAG, "Location failed", e)
-                    continuation.resume(null)
-                }
-                continuation.invokeOnCancellation {
-                    cancellationToken.cancel()
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Location error", e)
-            null
+        return suspendCancellableCoroutine { continuation ->
+            val token = CancellationTokenSource()
+            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, token.token)
+                .addOnSuccessListener { if (continuation.isActive) continuation.resume(it) }
+                .addOnFailureListener { if (continuation.isActive) continuation.resume(null) }
+            continuation.invokeOnCancellation { token.cancel() }
         }
     }
 
-    private fun getDayStartMillis(): Long {
-        val calendar = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        return calendar.timeInMillis
-    }
+    private fun getDayStartMillis(): Long = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
 
     override fun onDestroy() {
-        stopUserPresentMonitoring()
         captureJob?.cancel()
-        Log.i(TAG, "Service destroyed")
+        userPresentReceiver?.let { runCatching { unregisterReceiver(it) } }
+        userPresentReceiver = null
+        cameraCapturer.shutdown()
         super.onDestroy()
     }
 }

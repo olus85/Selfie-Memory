@@ -35,14 +35,22 @@ class SettingsDataStore(private val context: Context) {
         }
         .map(transform)
 
-    val networkMode: Flow<String> = context.dataStore.data.safeMap {
-        runCatching { NetworkMode.valueOf(it[NETWORK_MODE] ?: "") }
-            .getOrDefault(NetworkMode.CELLULAR).name
+    val networkModeFlow: Flow<String> = context.dataStore.data.safeMap {
+        val value = it[NETWORK_MODE] ?: ""
+        try {
+            NetworkMode.valueOf(value).name
+        } catch (e: IllegalArgumentException) {
+            NetworkMode.CELLULAR.name
+        }
     }
     val specificSsid: Flow<String> = context.dataStore.data.safeMap { it[SPECIFIC_SSID] ?: "" }
-    val cameraType: Flow<String> = context.dataStore.data.safeMap {
-        runCatching { CameraType.valueOf(it[CAMERA_TYPE] ?: "") }
-            .getOrDefault(CameraType.FRONT_ULTRA_WIDE).name
+    val cameraTypeFlow: Flow<String> = context.dataStore.data.safeMap {
+        val value = it[CAMERA_TYPE] ?: ""
+        try {
+            CameraType.valueOf(value).name
+        } catch (e: IllegalArgumentException) {
+            CameraType.FRONT_ULTRA_WIDE.name
+        }
     }
     val captureDelay: Flow<Int> = context.dataStore.data.safeMap { it[CAPTURE_DELAY] ?: 3 }
     val cooldownMinutes: Flow<Int> = context.dataStore.data.safeMap { it[COOLDOWN_MINUTES] ?: 10 }

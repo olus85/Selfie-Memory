@@ -17,8 +17,10 @@ class ViewerViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _selfieId = MutableStateFlow(0)
-    val selfie: StateFlow<Selfie?> = _selfieId.flatMapLatest { id ->
-        selfieRepository.getAllSelfies().map { list -> list.find { it.id == id } }
+    val selfies: StateFlow<List<Selfie>> = selfieRepository.getAllSelfies()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val selfie: StateFlow<Selfie?> = combine(_selfieId, selfies) { id, list ->
+        list.find { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun setSelfieId(id: Int) {

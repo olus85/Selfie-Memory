@@ -2,6 +2,30 @@
 
 All notable changes to **Selfie-Memory** are documented here.
 
+## [2.0.0] - 2026-08-18
+
+### Added
+- Pocket detection using proximity and ambient-light sensors.
+- Conservative post-capture luminance analysis that discards overwhelmingly black frames.
+- MediaStore publishing to `Pictures/Selfie Memory`, including a lossless migration of existing photos.
+- MediaStore-only storage for new photos, eliminating the app-private duplicate.
+- Adaptive gallery tiles, swipe navigation, pinch-to-zoom, sharing, and “Open with” support.
+- Android 15+ post-boot reactivation notification.
+
+### Fixed
+- Prevented the prohibited camera foreground-service launch from `BOOT_COMPLETED` on modern Android.
+- Removed unintended captures caused by network state changes; captures now originate only from unlock events.
+- Added camera warm-up time and quality-first JPEG capture so auto-exposure can settle.
+- Corrected oldest-photo ordering and deletion of matching MediaStore copies.
+- Changed orphan handling from destructive deletion to recovery.
+- Removed location permission as a hard requirement for taking a photo.
+- Removed blocking SSID retry sleeps from the service main thread.
+
+### Data safety
+- Added a non-destructive Room 1→2 migration with nullable MediaStore URIs.
+- Added a resumable, per-photo storage migration: a private original is deleted only after its MediaStore copy passes a byte-for-byte SHA-256 check and its URI is committed to Room.
+- Failed or interrupted migrations retain the private original and retry safely at the next app start.
+
 ## [1.3.0] - 2026-05-09
 
 ### Fixed

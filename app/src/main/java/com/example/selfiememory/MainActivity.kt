@@ -1,10 +1,15 @@
 package com.example.selfiememory
 
+import android.content.Intent
+import android.Manifest
+import android.app.NotificationManager
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -17,13 +22,21 @@ import com.example.selfiememory.ui.navigation.Screen
 import com.example.selfiememory.ui.settings.SettingsScreen
 import com.example.selfiememory.ui.theme.SelfieMemoryTheme
 import com.example.selfiememory.ui.viewer.ViewerScreen
+import com.example.selfiememory.service.SelfieCaptureService
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    companion object {
+        private const val TAG = "MainActivity"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        Log.i(TAG, "MainActivity onCreate()")
+
+        getSystemService(NotificationManager::class.java).cancel(1002)
 
         setContent {
             SelfieMemoryTheme {
@@ -74,5 +87,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        startCaptureServiceIfAllowed()
+    }
+
+    private fun startCaptureServiceIfAllowed() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return
+        runCatching {
+            ContextCompat.startForegroundService(
+                this,
+                Intent(this, SelfieCaptureService::class.java).setAction(SelfieCaptureService.ACTION_START)
+            )
+        }.onFailure { Log.e(TAG, "Could not activate capture service", it) }
     }
 }
