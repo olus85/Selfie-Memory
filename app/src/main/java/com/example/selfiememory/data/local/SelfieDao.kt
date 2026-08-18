@@ -8,7 +8,7 @@ interface SelfieDao {
     @Query("SELECT * FROM selfies ORDER BY timestamp DESC")
     fun getAllSelfies(): Flow<List<SelfieEntity>>
 
-    @Query("SELECT * FROM selfies ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM selfies ORDER BY timestamp ASC LIMIT :limit")
     suspend fun getOldestSelfies(limit: Int): List<SelfieEntity>
 
     @Query("SELECT COUNT(*) FROM selfies WHERE timestamp >= :dayStart")
@@ -25,4 +25,10 @@ interface SelfieDao {
 
     @Query("SELECT * FROM selfies WHERE id = :id")
     suspend fun getById(id: Int): SelfieEntity?
+
+    @Query("UPDATE selfies SET mediaUri = :mediaUri WHERE id = :id")
+    suspend fun updateMediaUri(id: Int, mediaUri: String)
+
+    @Query("UPDATE selfies SET filePath = '' WHERE id = :id")
+    suspend fun clearFilePath(id: Int)
 }

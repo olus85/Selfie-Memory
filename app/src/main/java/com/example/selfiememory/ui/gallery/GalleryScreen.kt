@@ -1,19 +1,45 @@
 package com.example.selfiememory.ui.gallery
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -21,7 +47,9 @@ import coil.compose.AsyncImage
 import com.example.selfiememory.domain.model.Selfie
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,70 +59,51 @@ fun GalleryScreen(
     viewModel: GalleryViewModel = hiltViewModel()
 ) {
     val selfies by viewModel.selfies.collectAsState()
-
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Selfie-Memory") },
+                title = {
+                    Column {
+                        Text("Erinnerungen", fontWeight = FontWeight.SemiBold)
+                        if (selfies.isNotEmpty()) {
+                            Text(
+                                "${selfies.size} Momente · ${selfies.count { it.mediaUri != null }} in der Fotogalerie",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
                 actions = {
                     IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
         if (selfies.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "No selfies yet.\nUnlock your device at a configured location to capture.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-            }
+            EmptyGallery(Modifier.fillMaxSize().padding(padding))
         } else {
-            val groupedSelfies = selfies.groupBy { selfie ->
-                getDateKey(selfie.timestamp)
-            }
-
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(vertical = 8.dp)
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(112.dp),
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 32.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                groupedSelfies.forEach { (dateKey, daySelfies) ->
-                    item(key = "header_$dateKey") {
-                        DateHeader(dateKey = dateKey)
+                selfies.groupBy { dateKey(it.timestamp) }.forEach { (day, daySelfies) ->
+                    item(key = "header_$day", span = { GridItemSpan(maxLineSpan) }) {
+                        Text(
+                            text = dateHeader(day),
+                            modifier = Modifier.padding(start = 6.dp, top = 14.dp, bottom = 5.dp),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
-
-                    items(
-                        items = daySelfies.chunked(3),
-                        key = { row -> row.map { it.id }.joinToString("_") }
-                    ) { rowSelfies ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                        ) {
-                            rowSelfies.forEach { selfie ->
-                                SelfieThumbnail(
-                                    selfie = selfie,
-                                    onClick = { onNavigateToViewer(selfie.id) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            // Fill remaining space if row is not complete
-                            repeat(3 - rowSelfies.size) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
+                    items(daySelfies, key = { it.id }) { selfie ->
+                        MemoryTile(selfie, { onNavigateToViewer(selfie.id) })
                     }
                 }
             }
@@ -103,87 +112,73 @@ fun GalleryScreen(
 }
 
 @Composable
-private fun DateHeader(dateKey: String) {
-    val displayDate = formatDateHeader(dateKey)
-
-    Text(
-        text = displayDate,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-    )
-}
-
-@Composable
-private fun SelfieThumbnail(
-    selfie: Selfie,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val file = File(selfie.filePath)
-    val fileExists = file.exists()
-
-    Card(
-        modifier = modifier
-            .aspectRatio(1f)
-            .padding(2.dp)
-            .clickable(onClick = onClick)
-    ) {
-        if (fileExists) {
-            AsyncImage(
-                model = file,
-                contentDescription = "Selfie",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.errorContainer),
-                contentAlignment = Alignment.Center
+private fun EmptyGallery(modifier: Modifier) {
+    Box(modifier = modifier.padding(24.dp), contentAlignment = Alignment.Center) {
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+            Column(
+                modifier = Modifier.padding(horizontal = 28.dp, vertical = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary)
+                Text("Dein nächster echter Moment landet hier.", style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
                 Text(
-                    text = "!",
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.headlineMedium
+                    "Beim Entsperren prüft Selfie Memory Netzwerk, Wartezeit und Hosentasche – schwarze Bilder werden verworfen.",
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    textAlign = TextAlign.Center
                 )
             }
         }
     }
 }
 
-private fun getDateKey(timestamp: Long): String {
-    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    return dateFormat.format(Date(timestamp))
-}
-
-private fun formatDateHeader(dateKey: String): String {
-    return try {
-        val inputFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val outputFormat = SimpleDateFormat("EEEE, d MMMM yyyy", Locale.getDefault())
-        val date = inputFormat.parse(dateKey)
-        if (date != null) {
-            val today = Calendar.getInstance()
-            val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
-            val selfieDate = Calendar.getInstance().apply { time = date }
-
-            when {
-                isSameDay(today, selfieDate) -> "Today"
-                isSameDay(yesterday, selfieDate) -> "Yesterday"
-                else -> outputFormat.format(date)
+@Composable
+private fun MemoryTile(selfie: Selfie, onClick: () -> Unit) {
+    val source: Any = selfie.mediaUri?.let(Uri::parse) ?: File(selfie.filePath)
+    Card(
+        modifier = Modifier.aspectRatio(0.82f).clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            AsyncImage(source, "Selfie", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Box(
+                Modifier.fillMaxWidth().align(Alignment.BottomCenter).background(
+                    Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color.Transparent, androidx.compose.ui.graphics.Color.Black.copy(alpha = .68f)))
+                ).padding(top = 28.dp, start = 9.dp, end = 9.dp, bottom = 8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(selfie.timestamp)),
+                        color = androidx.compose.ui.graphics.Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (selfie.mediaUri != null) Icon(
+                        Icons.Default.PhotoLibrary,
+                        contentDescription = "In Fotogalerie verfügbar",
+                        tint = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.clip(RoundedCornerShape(4.dp))
+                    )
+                }
             }
-        } else {
-            dateKey
         }
-    } catch (e: Exception) {
-        dateKey
     }
 }
 
-private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
-    return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
-            cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
-}
+private fun dateKey(timestamp: Long) = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date(timestamp))
+
+private fun dateHeader(key: String): String = runCatching {
+    val date = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).parse(key)!!
+    val target = Calendar.getInstance().apply { time = date }
+    val today = Calendar.getInstance()
+    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    when {
+        sameDay(target, today) -> "Heute"
+        sameDay(target, yesterday) -> "Gestern"
+        else -> SimpleDateFormat("EEEE, d. MMMM", Locale.getDefault()).format(date)
+    }
+}.getOrDefault(key)
+
+private fun sameDay(a: Calendar, b: Calendar) =
+    a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)

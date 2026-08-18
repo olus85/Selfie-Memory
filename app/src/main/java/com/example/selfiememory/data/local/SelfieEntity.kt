@@ -9,6 +9,7 @@ data class SelfieEntity(
     val id: Int = 0,
     val timestamp: Long,
     val filePath: String,
+    val mediaUri: String? = null,
     val latitude: Double?,
     val longitude: Double?
 )

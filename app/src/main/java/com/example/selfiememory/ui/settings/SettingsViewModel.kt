@@ -7,6 +7,7 @@ import com.example.selfiememory.data.repository.SettingsRepository
 import com.example.selfiememory.domain.model.CameraType
 import com.example.selfiememory.domain.model.NetworkMode
 import com.example.selfiememory.domain.model.Settings
+import com.example.selfiememory.service.NetworkMonitor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,16 +17,27 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     application: Application,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val networkMonitor: NetworkMonitor
 ) : AndroidViewModel(application) {
 
     val settings: StateFlow<Settings> = MutableStateFlow(Settings())
+
+    private val _availableSsids = MutableStateFlow<List<String>>(emptyList())
+    val availableSsids: StateFlow<List<String>> = _availableSsids
 
     init {
         viewModelScope.launch {
             settingsRepository.settings.collect { s ->
                 (settings as MutableStateFlow).value = s
             }
+        }
+        refreshAvailableSsids()
+    }
+
+    fun refreshAvailableSsids() {
+        viewModelScope.launch {
+            _availableSsids.value = networkMonitor.getAvailableSsids()
         }
     }
 
