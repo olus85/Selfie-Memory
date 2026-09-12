@@ -2,6 +2,15 @@
 
 All notable changes to **Selfie-Memory** are documented here.
 
+## [3.0.1-debug] - 2026-09-12
+
+### Fixed
+- Rotate every in-app selfie view 90 degrees clockwise, including comparisons and generated exports.
+- Generate monthly recaps off the UI thread and prevent duplicate exports while rendering.
+- Share recaps as named `.mp4` cache files instead of leaving automatic gallery artifacts.
+- Use a baseline H.264 stream at 10 fps for broader player compatibility and clean up incomplete exports.
+- Include explicit filenames and URI grants when sharing photos or videos.
+
 ## [3.0.0-debug] - 2026-09-12
 
 ### Fixed

@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.selfiememory"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "3.0.0-debug"
+        versionCode = 7
+        versionName = "3.0.1-debug"
     }
 
     buildFeatures {

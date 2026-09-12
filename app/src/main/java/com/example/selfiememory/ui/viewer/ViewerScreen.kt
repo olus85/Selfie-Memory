@@ -51,9 +51,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil.compose.AsyncImage
 import androidx.core.content.FileProvider
 import com.example.selfiememory.domain.model.Selfie
+import com.example.selfiememory.ui.common.RotatedSelfieImage
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -143,11 +143,11 @@ fun ViewerScreen(
             Box(Modifier.fillMaxSize().padding(padding)) {
                 if(compare && selfies.size>1){
                     val other=selfies.getOrNull((pagerState.currentPage+1).coerceAtMost(selfies.lastIndex))
-                    Row(Modifier.fillMaxSize()){listOf(current,other).forEach{item->item?.let{val source:Any=it.mediaUri?.let(Uri::parse)?:File(it.filePath);AsyncImage(source,"Vergleich",Modifier.weight(1f).fillMaxSize(),contentScale=ContentScale.Crop)}}}
+                    Row(Modifier.fillMaxSize()){listOf(current,other).forEach{item->item?.let{val source:Any=it.mediaUri?.let(Uri::parse)?:File(it.filePath);RotatedSelfieImage(source,"Vergleich",Modifier.weight(1f).fillMaxSize(),contentScale=ContentScale.Crop)}}}
                 } else HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
                     selfies.getOrNull(page)?.let { pageSelfie ->
                         val source: Any = pageSelfie.mediaUri?.let(Uri::parse) ?: File(pageSelfie.filePath)
-                        AsyncImage(
+                        RotatedSelfieImage(
                             model = source,
                             contentDescription = "Selfie",
                             modifier = Modifier.fillMaxSize().graphicsLayer(
@@ -217,6 +217,8 @@ private fun share(context: android.content.Context, uriString: String) {
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "image/jpeg"
         putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_TITLE, "Selfie-Memory.jpg")
+        clipData = android.content.ClipData.newUri(context.contentResolver, "selfie.jpg", uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(intent, "Erinnerung teilen"))
