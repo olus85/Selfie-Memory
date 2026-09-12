@@ -28,7 +28,7 @@ import java.util.Date
     val permissions=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){vm.refreshAvailableSsids()}
     val backup=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")){it?.let(vm::exportBackup)}
     val restore=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){it?.let(vm::importBackup)}
-    LaunchedEffect(Unit){val p=buildList{add(Manifest.permission.CAMERA);add(Manifest.permission.ACCESS_FINE_LOCATION);if(Build.VERSION.SDK_INT>=33)add(Manifest.permission.POST_NOTIFICATIONS)};permissions.launch(p.toTypedArray())}
+    LaunchedEffect(Unit){val p=buildList{add(Manifest.permission.CAMERA);add(Manifest.permission.ACCESS_FINE_LOCATION);if(Build.VERSION.SDK_INT>=33){add(Manifest.permission.POST_NOTIFICATIONS);add(Manifest.permission.READ_MEDIA_IMAGES)};if(Build.VERSION.SDK_INT>=34)add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)};permissions.launch(p.toTypedArray())}
     message?.let{LaunchedEffect(it){vm.clearMessage()}}
     Scaffold(topBar={TopAppBar(title={Text("Einstellungen")},navigationIcon={IconButton(onClick=onNavigateBack){Icon(Icons.AutoMirrored.Filled.ArrowBack,"Zurück")}})}){pad->
         Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(14.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
