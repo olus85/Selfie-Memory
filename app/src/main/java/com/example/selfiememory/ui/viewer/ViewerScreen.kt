@@ -20,6 +20,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.filled.Compare
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -28,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -47,6 +52,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import androidx.core.content.FileProvider
+import com.example.selfiememory.domain.model.Selfie
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -64,6 +71,8 @@ fun ViewerScreen(
     val selfies by viewModel.selfies.collectAsState()
     val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showJournal by remember { mutableStateOf(false) }
+    var compare by remember { mutableStateOf(false) }
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
@@ -108,11 +117,17 @@ fun ViewerScreen(
                     }
                 },
                 actions = {
-                    selfie?.mediaUri?.let { uriString ->
+                    selfie?.let { current ->
+                        IconButton(onClick = { viewModel.setFavorite(current) }) { Icon(if(current.favorite) Icons.Filled.Star else Icons.Outlined.Star,"Favorit",tint=Color.White) }
+                        IconButton(onClick = { compare=!compare }) { Icon(Icons.Default.Compare,"Vergleichen",tint=Color.White) }
+                    }
+                    selfie?.let { shareSelfie ->
+                        shareSelfie.mediaUri?.let { uriString ->
                         IconButton(onClick = { openExternally(context, uriString) }) {
                             Icon(Icons.AutoMirrored.Filled.OpenInNew, "In Foto-App öffnen", tint = Color.White)
                         }
-                        IconButton(onClick = { share(context, uriString) }) {
+                        }
+                        IconButton(onClick = { share(context, contentUri(context, shareSelfie).toString()) }) {
                             Icon(Icons.Default.Share, "Teilen", tint = Color.White)
                         }
                     }
@@ -126,7 +141,10 @@ fun ViewerScreen(
     ) { padding ->
         selfie?.let { current ->
             Box(Modifier.fillMaxSize().padding(padding)) {
-                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                if(compare && selfies.size>1){
+                    val other=selfies.getOrNull((pagerState.currentPage+1).coerceAtMost(selfies.lastIndex))
+                    Row(Modifier.fillMaxSize()){listOf(current,other).forEach{item->item?.let{val source:Any=it.mediaUri?.let(Uri::parse)?:File(it.filePath);AsyncImage(source,"Vergleich",Modifier.weight(1f).fillMaxSize(),contentScale=ContentScale.Crop)}}}
+                } else HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
                     selfies.getOrNull(page)?.let { pageSelfie ->
                         val source: Any = pageSelfie.mediaUri?.let(Uri::parse) ?: File(pageSelfie.filePath)
                         AsyncImage(
@@ -157,6 +175,12 @@ fun ViewerScreen(
                         }
                         if (current.mediaUri != null) Text("${pagerState.currentPage + 1}/${selfies.size} · In Fotogalerie gesichert", color = Color.LightGray)
                     }
+                    if(current.tags.isNotBlank()) Text("🏷 ${current.tags}",color=Color.White)
+                    if(current.note.isNotBlank()) Text(current.note,color=Color.LightGray)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        TextButton(onClick={showJournal=true}){Text("Notiz & Tags")}
+                        if(compare&&selfies.size>1)TextButton(onClick={val other=selfies.getOrNull((pagerState.currentPage+1).coerceAtMost(selfies.lastIndex));if(other!=null)viewModel.createComparison(current,other){it?.let{share(context,it.toString())}}}){Text("Collage teilen")}
+                    }
                 }
             }
         }
@@ -177,6 +201,7 @@ fun ViewerScreen(
             dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Abbrechen") } }
         )
     }
+    if(showJournal){val current=selfie;var note by remember(current?.id){mutableStateOf(current?.note.orEmpty())};var tags by remember(current?.id){mutableStateOf(current?.tags.orEmpty())};AlertDialog(onDismissRequest={showJournal=false},title={Text("Outfit-Tagebuch")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){OutlinedTextField(note,{note=it},label={Text("Notiz")});OutlinedTextField(tags,{tags=it},label={Text("Tags, z. B. Büro, Sommer")})}},confirmButton={TextButton(onClick={current?.let{viewModel.saveJournal(it,note,tags)};showJournal=false}){Text("Speichern")}},dismissButton={TextButton(onClick={showJournal=false}){Text("Abbrechen")}})}
 }
 
 private fun openExternally(context: android.content.Context, uriString: String) {
@@ -196,3 +221,6 @@ private fun share(context: android.content.Context, uriString: String) {
     }
     context.startActivity(Intent.createChooser(intent, "Erinnerung teilen"))
 }
+
+private fun contentUri(context: android.content.Context, selfie: Selfie): Uri = selfie.mediaUri?.let(Uri::parse)
+    ?: FileProvider.getUriForFile(context, "${context.packageName}.files", File(selfie.filePath))

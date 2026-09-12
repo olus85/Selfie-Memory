@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.ContextCompat
@@ -23,10 +22,24 @@ import com.example.selfiememory.ui.settings.SettingsScreen
 import com.example.selfiememory.ui.theme.SelfieMemoryTheme
 import com.example.selfiememory.ui.viewer.ViewerScreen
 import com.example.selfiememory.service.SelfieCaptureService
+import com.example.selfiememory.data.repository.SettingsRepository
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 import dagger.hilt.android.AndroidEntryPoint
+import androidx.fragment.app.FragmentActivity
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.Text
+import androidx.biometric.BiometricPrompt
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+    @Inject lateinit var settingsRepository: SettingsRepository
+    private val unlocked = mutableStateOf(false)
+    private var lockEnabled = false
     companion object {
         private const val TAG = "MainActivity"
     }
@@ -44,6 +57,8 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
+                    if (!unlocked.value) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Selfie Memory ist geschützt") } }
+                    else {
                     val navController = rememberNavController()
 
                     NavHost(
@@ -84,9 +99,11 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                    }
                 }
             }
         }
+        lifecycleScope.launch { lockEnabled = settingsRepository.settings.first().appLockEnabled; if(lockEnabled) authenticate() else unlocked.value=true }
     }
 
     override fun onResume() {
@@ -94,13 +111,21 @@ class MainActivity : ComponentActivity() {
         startCaptureServiceIfAllowed()
     }
 
+    override fun onStop() { super.onStop(); if(lockEnabled && !isChangingConfigurations) unlocked.value=false }
+
+    private fun authenticate(){
+        val executor=ContextCompat.getMainExecutor(this)
+        val prompt=BiometricPrompt(this,executor,object:BiometricPrompt.AuthenticationCallback(){override fun onAuthenticationSucceeded(result:BiometricPrompt.AuthenticationResult){unlocked.value=true}})
+        prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Selfie Memory entsperren").setSubtitle("Private Erinnerungen anzeigen").setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG or androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL).build())
+    }
+
     private fun startCaptureServiceIfAllowed() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return
-        runCatching {
-            ContextCompat.startForegroundService(
-                this,
-                Intent(this, SelfieCaptureService::class.java).setAction(SelfieCaptureService.ACTION_START)
-            )
-        }.onFailure { Log.e(TAG, "Could not activate capture service", it) }
+        lifecycleScope.launch {
+            val settings = settingsRepository.settings.first()
+            if (!settings.enabled || settings.pausedUntil > System.currentTimeMillis()) return@launch
+            runCatching { ContextCompat.startForegroundService(this@MainActivity,Intent(this@MainActivity, SelfieCaptureService::class.java).setAction(SelfieCaptureService.ACTION_START)) }
+                .onFailure { Log.e(TAG, "Could not activate capture service", it) }
+        }
     }
 }

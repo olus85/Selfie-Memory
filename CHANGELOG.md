@@ -2,6 +2,20 @@
 
 All notable changes to **Selfie-Memory** are documented here.
 
+## [3.0.0-debug] - 2026-09-12
+
+### Fixed
+- Restore Pixel unlock delivery by accepting the protected `USER_PRESENT` broadcast from SystemUI.
+- Never delete archive photos when the daily capture gate is reached.
+- Persist stop/pause state and show the reason for every skipped or failed capture.
+
+### Added
+- Manual test capture, notification controls, Quick Settings tile, time/day/battery/network rules.
+- Real wide/normal front framing, mirroring, configurable pocket and darkness handling.
+- Private or gallery storage, location precision, app lock, ZIP backup/restore, and 30-day trash.
+- Outfit favorites, notes, tags, search, side-by-side comparisons and collage sharing.
+- Local MP4 monthly recap export.
+
 ## [2.0.0] - 2026-08-18
 
 ### Added

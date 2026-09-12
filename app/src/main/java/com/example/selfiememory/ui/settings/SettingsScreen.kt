@@ -1,18 +1,15 @@
 package com.example.selfiememory.ui.settings
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,252 +18,62 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.selfiememory.domain.model.CameraType
-import com.example.selfiememory.domain.model.NetworkMode
-import com.example.selfiememory.service.SelfieCaptureService
+import com.example.selfiememory.domain.model.*
+import java.text.DateFormat
+import java.util.Date
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SettingsScreen(
-    onNavigateBack: () -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel()
-) {
-    val settings by viewModel.settings.collectAsState()
-    val availableSsids by viewModel.availableSsids.collectAsState()
-    val context = LocalContext.current
-    var hasPermissions by remember { mutableStateOf(false) }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        hasPermissions = permissions.values.all { it }
-        if (hasPermissions) {
-            viewModel.refreshAvailableSsids()
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, SelfieCaptureService::class.java).setAction(SelfieCaptureService.ACTION_START)
-            )
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        val permissions = buildList {
-            add(Manifest.permission.CAMERA)
-            add(Manifest.permission.ACCESS_FINE_LOCATION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                add(Manifest.permission.POST_NOTIFICATIONS)
+@OptIn(ExperimentalMaterial3Api::class,ExperimentalLayoutApi::class)
+@Composable fun SettingsScreen(onNavigateBack:()->Unit,vm:SettingsViewModel=hiltViewModel()){
+    val s by vm.settings.collectAsState();val scans by vm.availableSsids.collectAsState();val message by vm.message.collectAsState();val context=LocalContext.current
+    val permissions=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){vm.refreshAvailableSsids()}
+    val backup=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")){it?.let(vm::exportBackup)}
+    val restore=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){it?.let(vm::importBackup)}
+    LaunchedEffect(Unit){val p=buildList{add(Manifest.permission.CAMERA);add(Manifest.permission.ACCESS_FINE_LOCATION);if(Build.VERSION.SDK_INT>=33)add(Manifest.permission.POST_NOTIFICATIONS)};permissions.launch(p.toTypedArray())}
+    message?.let{LaunchedEffect(it){vm.clearMessage()}}
+    Scaffold(topBar={TopAppBar(title={Text("Einstellungen")},navigationIcon={IconButton(onClick=onNavigateBack){Icon(Icons.AutoMirrored.Filled.ArrowBack,"Zurück")}})}){pad->
+        Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(14.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+            StatusCard(s)
+            SettingsCard("Automatik"){
+                Toggle("Aufnahmen beim Entsperren",s.enabled,vm::enabled)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){Button(onClick={vm.pause(3_600_000)},enabled=s.enabled){Text("1 Std. Pause")};OutlinedButton(onClick={vm.pause(0)}){Text("Fortsetzen")};Button(onClick=vm::testPhoto,enabled=ContextCompat.checkSelfPermission(context,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED){Text("Testfoto")}}
             }
-        }
-        permissionLauncher.launch(permissions.toTypedArray())
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
+            SettingsCard("Auslöser und Profile"){
+                EnumDropdown("Netzwerk",s.networkMode,NetworkMode.entries,{when(it){NetworkMode.ANY->"Überall";NetworkMode.CELLULAR->"Nur Mobilfunk";NetworkMode.ANY_WLAN->"Jedes WLAN";NetworkMode.SPECIFIC_WLAN->"Ausgewählte WLANs"}},vm::network)
+                if(s.networkMode==NetworkMode.SPECIFIC_WLAN){
+                    var manual by remember(s.allowedSsids){mutableStateOf(s.allowedSsids.joinToString(", "))}
+                    OutlinedTextField(manual,{manual=it},Modifier.fillMaxWidth(),label={Text("WLANs, durch Komma getrennt")},supportingText={Text("Gefunden: ${scans.take(4).joinToString().ifBlank{"keine"}}")})
+                    Button(onClick={vm.ssids(manual.split(',').map(String::trim).filter(String::isNotBlank).toSet())}){Text("WLAN-Liste übernehmen")}
                 }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            // Permissions section
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Permissions", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = if (hasPermissions) "All permissions granted" else "Some permissions missing",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
+                ValueSlider("Verzögerung",s.captureDelaySeconds,0..15,"s",vm::delay)
+                ValueSlider("Cooldown",s.cooldownMinutes,0..240,"min",vm::cooldown)
+                ValueSlider("Tageslimit",s.dailyLimit,1..100,"Fotos",vm::limit)
+                Text("Aktiv ${s.startHour}:00 bis ${s.endHour}:00")
+                ValueSlider("Start",s.startHour,0..23,"Uhr",{vm.time(it,s.endHour)})
+                ValueSlider("Ende",s.endHour,1..24,"Uhr",{vm.time(s.startHour,it)})
+                Text("Wochentage")
+                FlowRow(horizontalArrangement=Arrangement.spacedBy(4.dp)){listOf("Mo","Di","Mi","Do","Fr","Sa","So").forEachIndexed{i,n->FilterChip(selected=s.weekdaysMask and (1 shl i)!=0,onClick={vm.weekdays(s.weekdaysMask xor (1 shl i))},label={Text(n)})}}
+                ValueSlider("Mindestakku",s.minBatteryPercent,0..90,"%",vm::battery);Toggle("Nur beim Laden",s.chargingOnly,vm::charging)
             }
-
-            // Network Trigger
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Network Trigger", style = MaterialTheme.typography.titleMedium)
-                        Spacer(modifier = Modifier.weight(1f))
-                        IconButton(onClick = { viewModel.refreshAvailableSsids() }) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Refresh networks"
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    NetworkMode.entries.forEach { mode ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            RadioButton(
-                                selected = settings.networkMode == mode,
-                                onClick = { viewModel.setNetworkMode(mode) }
-                            )
-                            Text(
-                                text = when (mode) {
-                                    NetworkMode.CELLULAR -> "Cellular Data"
-                                    NetworkMode.ANY_WLAN -> "Any WLAN"
-                                    NetworkMode.SPECIFIC_WLAN -> "Specific WLAN"
-                                },
-                                modifier = Modifier.padding(start = 8.dp)
-                            )
-                        }
-                    }
-
-                    if (settings.networkMode == NetworkMode.SPECIFIC_WLAN) {
-                        var expanded by remember { mutableStateOf(false) }
-                        val displaySsids = if (availableSsids.isEmpty()) {
-                            listOf(settings.specificSsid).filter { it.isNotBlank() }
-                        } else {
-                            availableSsids
-                        }
-
-                        ExposedDropdownMenuBox(
-                            expanded = expanded,
-                            onExpandedChange = { expanded = it }
-                        ) {
-                            OutlinedTextField(
-                                value = settings.specificSsid.ifBlank { "Select a network" },
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("WLAN SSID") },
-                                trailingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDropDown,
-                                        contentDescription = null
-                                    )
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .menuAnchor(),
-                                singleLine = true
-                            )
-                            ExposedDropdownMenu(
-                                expanded = expanded,
-                                onDismissRequest = { expanded = false }
-                            ) {
-                                if (displaySsids.isEmpty()) {
-                                    DropdownMenuItem(
-                                        text = { Text("No networks found") },
-                                        onClick = { expanded = false },
-                                        enabled = false
-                                    )
-                                } else {
-                                    displaySsids.forEach { ssid ->
-                                        DropdownMenuItem(
-                                            text = { Text(ssid) },
-                                            onClick = {
-                                                viewModel.setSpecificSsid(ssid)
-                                                expanded = false
-                                            },
-                                            modifier = Modifier.clickable {
-                                                viewModel.setSpecificSsid(ssid)
-                                                expanded = false
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        if (displaySsids.isEmpty()) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "No WiFi networks detected. Make sure location permission is granted and WiFi is enabled.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+            SettingsCard("Kamera und Qualität"){
+                EnumDropdown("Kamera",s.cameraType,CameraType.entries,{when(it){CameraType.FRONT_ULTRA_WIDE->"Front weit";CameraType.FRONT_NORMAL->"Front normal";CameraType.BACK->"Rückkamera"}},vm::camera)
+                Toggle("Frontfoto spiegeln",s.mirrorFrontCamera,vm::mirror);Toggle("Hosentaschenschutz",s.pocketProtection,vm::pocket)
+                EnumDropdown("Dunkle Fotos",s.qualityMode,QualityMode.entries,{when(it){QualityMode.OFF->"Immer speichern";QualityMode.WARN->"Speichern + Hinweis";QualityMode.STRICT->"Verwerfen"}},vm::quality)
             }
-
-            // Camera
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Camera", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    CameraType.entries.forEach { type ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            RadioButton(
-                                selected = settings.cameraType == type,
-                                onClick = { viewModel.setCameraType(type) }
-                            )
-                            Text(
-                                text = when (type) {
-                                    CameraType.FRONT_ULTRA_WIDE -> "Front Ultra-Wide (Default)"
-                                    CameraType.FRONT_NORMAL -> "Front Normal"
-                                    CameraType.BACK -> "Back Camera"
-                                },
-                                modifier = Modifier.padding(start = 8.dp)
-                            )
-                        }
-                    }
-                }
+            SettingsCard("Datenschutz und Speicher"){
+                EnumDropdown("Ablage",s.storageMode,StorageMode.entries,{if(it==StorageMode.PRIVATE)"Nur in der App" else "Auch in Fotogalerie"},vm::storage)
+                EnumDropdown("Standort",s.locationMode,LocationMode.entries,{when(it){LocationMode.OFF->"Aus";LocationMode.APPROXIMATE->"Ungefähr";LocationMode.EXACT->"Genau"}},vm::location)
+                Toggle("App mit Gerätesperre schützen",s.appLockEnabled,vm::appLock)
+                OutlinedButton(onClick={backup.launch("selfie-memory-backup-${System.currentTimeMillis()}.zip")}){Text("Fotos & Tagebuch sichern")}
+                OutlinedButton(onClick={restore.launch(arrayOf("application/zip","application/octet-stream"))}){Text("Backup wiederherstellen")}
+                Text("Gelöschte Einträge bleiben 30 Tage im Papierkorb. Fotos und Funktionen laufen komplett lokal.",style=MaterialTheme.typography.bodySmall)
             }
-
-            // Capture Delay
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Capture Delay: ${settings.captureDelaySeconds} seconds", style = MaterialTheme.typography.titleMedium)
-                    Slider(
-                        value = settings.captureDelaySeconds.toFloat(),
-                        onValueChange = { viewModel.setCaptureDelay(it.toInt()) },
-                        valueRange = 0f..10f,
-                        steps = 9
-                    )
-                }
-            }
-
-            // Cooldown
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Cooldown: ${settings.cooldownMinutes} minutes", style = MaterialTheme.typography.titleMedium)
-                    Slider(
-                        value = settings.cooldownMinutes.toFloat(),
-                        onValueChange = { viewModel.setCooldownMinutes(it.toInt()) },
-                        valueRange = 1f..120f,
-                        steps = 118
-                    )
-                }
-            }
-
-            // Daily Limit
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Daily Limit: ${settings.dailyLimit} selfies", style = MaterialTheme.typography.titleMedium)
-                    Slider(
-                        value = settings.dailyLimit.toFloat(),
-                        onValueChange = { viewModel.setDailyLimit(it.toInt()) },
-                        valueRange = 1f..50f,
-                        steps = 48
-                    )
-                }
-            }
+            message?.let{Text(it,color=MaterialTheme.colorScheme.primary)}
         }
     }
 }
+
+@Composable private fun StatusCard(s:Settings)=Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)){Column(Modifier.padding(16.dp)){Text(if(s.enabled)"● Automatik aktiv" else "○ Automatik aus",style=MaterialTheme.typography.titleMedium);Text(s.lastStatus);if(s.lastStatusTime>0)Text(DateFormat.getDateTimeInstance().format(Date(s.lastStatusTime)),style=MaterialTheme.typography.bodySmall)}}
+@Composable private fun SettingsCard(title:String,content:@Composable ColumnScope.()->Unit)=Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(title,style=MaterialTheme.typography.titleMedium);content()}}
+@Composable private fun Toggle(text:String,value:Boolean,onChange:(Boolean)->Unit)=Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Text(text,Modifier.weight(1f));Switch(value,onChange)}
+@Composable private fun ValueSlider(name:String,value:Int,range:IntRange,suffix:String,onChange:(Int)->Unit){Text("$name: $value $suffix");Slider(value.toFloat(),{onChange(it.toInt())},valueRange=range.first.toFloat()..range.last.toFloat())}
+@OptIn(ExperimentalMaterial3Api::class) @Composable private fun <T> EnumDropdown(label:String,value:T,values:List<T>,name:(T)->String,onChange:(T)->Unit){var open by remember{mutableStateOf(false)};ExposedDropdownMenuBox(open,{open=it}){OutlinedTextField(name(value),{},Modifier.menuAnchor().fillMaxWidth(),readOnly=true,label={Text(label)});ExposedDropdownMenu(open,{open=false}){values.forEach{DropdownMenuItem({Text(name(it))},{onChange(it);open=false})}}}}

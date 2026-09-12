@@ -2,6 +2,9 @@ package com.example.selfiememory.service
 
 import android.content.Context
 import android.util.Log
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import java.io.ByteArrayOutputStream
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -33,7 +36,7 @@ class CameraCapturer @Inject constructor(
 
     private var cameraProvider: ProcessCameraProvider? = null
 
-    suspend fun captureImage(lifecycleOwner: LifecycleOwner, cameraType: CameraType): ByteArray =
+    suspend fun captureImage(lifecycleOwner: LifecycleOwner, cameraType: CameraType, mirror: Boolean = true): ByteArray =
         withTimeout(CAPTURE_TIMEOUT_MS) {
             withContext(Dispatchers.Main.immediate) {
                 val provider = awaitCameraProvider()
@@ -49,15 +52,31 @@ class CameraCapturer @Inject constructor(
 
                 try {
                     provider.unbindAll()
-                    provider.bindToLifecycle(lifecycleOwner, selector, imageCapture)
+                    val camera = provider.bindToLifecycle(lifecycleOwner, selector, imageCapture)
+                    val zoom = when (cameraType) {
+                        CameraType.FRONT_ULTRA_WIDE -> camera.cameraInfo.zoomState.value?.minZoomRatio ?: 1f
+                        CameraType.FRONT_NORMAL -> 1.18f
+                        CameraType.BACK -> 1f
+                    }.coerceIn(camera.cameraInfo.zoomState.value?.minZoomRatio ?: 1f, camera.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f)
+                    camera.cameraControl.setZoomRatio(zoom)
                     // CameraX binding is not exposure readiness. Give 3A time to settle.
                     delay(CAMERA_WARMUP_MS)
-                    takePicture(imageCapture)
+                    val jpeg = takePicture(imageCapture)
+                    if (mirror && cameraType != CameraType.BACK) mirrorJpeg(jpeg) else jpeg
                 } finally {
                     provider.unbindAll()
                 }
             }
         }
+
+    private suspend fun mirrorJpeg(bytes: ByteArray): ByteArray = withContext(Dispatchers.Default) {
+        val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext bytes
+        val mirrored = android.graphics.Bitmap.createBitmap(source, 0, 0, source.width, source.height, Matrix().apply { setScale(-1f, 1f) }, true)
+        ByteArrayOutputStream().use { out ->
+            mirrored.compress(android.graphics.Bitmap.CompressFormat.JPEG, 94, out)
+            if (mirrored !== source) mirrored.recycle(); source.recycle(); out.toByteArray()
+        }
+    }
 
     private suspend fun awaitCameraProvider(): ProcessCameraProvider = suspendCancellableCoroutine { continuation ->
         val future = ProcessCameraProvider.getInstance(context)

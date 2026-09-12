@@ -75,6 +75,14 @@ class NetworkMonitor @Inject constructor(
         return isConditionMetForNetwork(activeNetwork, networkMode, specificSsid)
     }
 
+    fun isConditionMetPublic(networkMode: NetworkMode, allowedSsids: Set<String>): Boolean {
+        if (networkMode != NetworkMode.SPECIFIC_WLAN) return isConditionMetPublic(networkMode, "")
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return false
+        return getCurrentSsid(capabilities) in allowedSsids
+    }
+
     @SuppressLint("MissingPermission")
     private fun isConditionMetForNetwork(network: Network, networkMode: NetworkMode, specificSsid: String): Boolean {
         val capabilities = connectivityManager.getNetworkCapabilities(network)
@@ -87,6 +95,7 @@ class NetworkMonitor @Inject constructor(
         Log.i(TAG, "Transport: wifi=$hasWifi, cellular=$hasCellular, internet=$hasInternet")
 
         return when (networkMode) {
+            NetworkMode.ANY -> true
             NetworkMode.CELLULAR -> {
                 Log.i(TAG, "CELLULAR mode: $hasCellular")
                 hasCellular

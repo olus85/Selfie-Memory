@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.selfiememory"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "2.0.0"
+        versionCode = 6
+        versionName = "3.0.0-debug"
     }
 
     buildFeatures {
@@ -47,6 +47,7 @@ android {
         implementation("androidx.navigation:navigation-compose:2.7.7")
         implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
         implementation("androidx.lifecycle:lifecycle-service:2.7.0")
+        implementation("androidx.biometric:biometric:1.1.0")
 
         // CameraX
         val cameraxVersion = "1.3.1"

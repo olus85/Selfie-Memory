@@ -21,6 +21,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Star
+import android.content.Intent
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilterChip
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,6 +68,8 @@ fun GalleryScreen(
     viewModel: GalleryViewModel = hiltViewModel()
 ) {
     val selfies by viewModel.selfies.collectAsState()
+    val settings by viewModel.settings.collectAsState();val context=LocalContext.current
+    var query by remember{mutableStateOf("")};var favorites by remember{mutableStateOf(false)};var trash by remember{mutableStateOf(false)};var exportMessage by remember{mutableStateOf<String?>(null)}
     Scaffold(
         topBar = {
             TopAppBar(
@@ -75,6 +86,19 @@ fun GalleryScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        viewModel.monthlyVideo { uri, error ->
+                            exportMessage = error
+                            if (uri != null) {
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "video/mp4"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(intent, "Monatsrückblick teilen"))
+                            }
+                        }
+                    }) { Icon(Icons.Default.Movie, "Monatsrückblick") }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
                     }
@@ -83,12 +107,16 @@ fun GalleryScreen(
             )
         }
     ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)){
+            Card(Modifier.fillMaxWidth().padding(horizontal=8.dp,vertical=4.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)){Column(Modifier.padding(12.dp)){Text(if(settings.enabled)"Automatik aktiv" else "Automatik ausgeschaltet",fontWeight=FontWeight.SemiBold);Text(settings.lastStatus,style=MaterialTheme.typography.bodySmall)}}
+            Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically){OutlinedTextField(query,{query=it;viewModel.search(it)},Modifier.weight(1f),singleLine=true,label={Text("Tags oder Notizen suchen")});FilterChip(favorites,{favorites=!favorites;viewModel.favorites(favorites)},{Icon(Icons.Default.Star,"Favoriten")});FilterChip(trash,{trash=!trash;viewModel.trash(trash)},{Text("Papierkorb")})}
+            exportMessage?.let{Text(it,Modifier.padding(8.dp),color=MaterialTheme.colorScheme.error)}
         if (selfies.isEmpty()) {
-            EmptyGallery(Modifier.fillMaxSize().padding(padding))
+            EmptyGallery(Modifier.fillMaxSize())
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(112.dp),
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 32.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
@@ -103,10 +131,11 @@ fun GalleryScreen(
                         )
                     }
                     items(daySelfies, key = { it.id }) { selfie ->
-                        MemoryTile(selfie, { onNavigateToViewer(selfie.id) })
+                        MemoryTile(selfie, { if(trash)viewModel.restore(selfie.id) else onNavigateToViewer(selfie.id) })
                     }
                 }
             }
+        }
         }
     }
 }
@@ -160,6 +189,7 @@ private fun MemoryTile(selfie: Selfie, onClick: () -> Unit) {
                         tint = androidx.compose.ui.graphics.Color.White,
                         modifier = Modifier.clip(RoundedCornerShape(4.dp))
                     )
+                    if(selfie.favorite) Icon(Icons.Default.Star,"Favorit",tint=androidx.compose.ui.graphics.Color.Yellow)
                 }
             }
         }

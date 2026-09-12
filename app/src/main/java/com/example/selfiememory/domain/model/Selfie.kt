@@ -6,5 +6,9 @@ data class Selfie(
     val filePath: String,
     val mediaUri: String?,
     val latitude: Double?,
-    val longitude: Double?
+    val longitude: Double?,
+    val favorite: Boolean = false,
+    val note: String = "",
+    val tags: String = "",
+    val trashedAt: Long? = null
 )

@@ -9,6 +9,7 @@ import android.util.Log
 import com.example.selfiememory.data.local.SelfieDao
 import com.example.selfiememory.data.local.SelfieEntity
 import com.example.selfiememory.domain.model.Selfie
+import com.example.selfiememory.domain.model.StorageMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -21,6 +22,10 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import java.util.zip.ZipInputStream
+import android.util.Base64
 
 class SelfieRepository(
     private val context: Context,
@@ -48,7 +53,9 @@ class SelfieRepository(
         }
     }
 
-    suspend fun saveSelfie(imageBytes: ByteArray, latitude: Double?, longitude: Double?): Selfie {
+    fun getTrashed(): Flow<List<Selfie>> = selfieDao.getTrashed().map { list -> list.map { it.toDomain() } }
+
+    suspend fun saveSelfie(imageBytes: ByteArray, latitude: Double?, longitude: Double?, storageMode: StorageMode = StorageMode.GALLERY): Selfie {
         return storageMutex.withLock {
             withContext(Dispatchers.IO) {
                 val timestamp = System.currentTimeMillis()
@@ -56,7 +63,7 @@ class SelfieRepository(
 
                 // MediaStore is the canonical store. A private file is only a safety
                 // fallback for old devices where public storage cannot be written.
-                saveDirectlyToMediaStore(imageBytes, fileName, timestamp)?.let { mediaUri ->
+                if (storageMode == StorageMode.GALLERY) saveDirectlyToMediaStore(imageBytes, fileName, timestamp)?.let { mediaUri ->
                     val entity = SelfieEntity(
                         timestamp = timestamp,
                         filePath = "",
@@ -94,14 +101,27 @@ class SelfieRepository(
     }
 
     suspend fun deleteSelfie(selfie: Selfie) {
+        selfieDao.moveToTrash(selfie.id, System.currentTimeMillis())
+    }
+
+    suspend fun restoreSelfie(id: Int) = selfieDao.restore(id)
+    suspend fun setFavorite(id: Int, favorite: Boolean) = selfieDao.setFavorite(id, favorite)
+    suspend fun updateJournal(id: Int, note: String, tags: String) = selfieDao.updateJournal(id, note.trim(), tags.trim())
+
+    suspend fun emptyExpiredTrash(days: Int = 30) {
+        val before = System.currentTimeMillis() - days * 86_400_000L
+        selfieDao.expiredTrash(before).forEach { permanentlyDelete(it.toDomain()) }
+    }
+
+    private suspend fun permanentlyDelete(selfie: Selfie) {
         withContext(Dispatchers.IO) {
             val file = selfie.filePath.takeIf { it.isNotBlank() }?.let(::File)
             if (file?.exists() == true && !file.delete()) {
                 throw IllegalStateException("Failed to delete file: ${selfie.filePath}")
             }
             selfie.mediaUri?.let { uri ->
-                runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
-                    .onFailure { Log.w(TAG, "Could not remove gallery copy: $uri", it) }
+                val deleted = context.contentResolver.delete(Uri.parse(uri), null, null)
+                if (deleted < 1) throw IllegalStateException("Galeriefoto konnte nicht gelöscht werden")
             }
             selfieDao.deleteById(selfie.id)
         }
@@ -112,23 +132,47 @@ class SelfieRepository(
     suspend fun getOldestSelfies(limit: Int): List<Selfie> = selfieDao.getOldestSelfies(limit).map { it.toDomain() }
 
     suspend fun enforceDailyLimit(limit: Int, dayStart: Long) {
-        mutex.withLock {
-            val count = getCountSince(dayStart)
-            if (count > limit) {
-                val toDelete = count - limit
-                val oldest = getOldestSelfies(toDelete)
-                withContext(Dispatchers.IO) {
-                    oldest.forEach { selfie ->
-                        try {
-                            deleteSelfie(selfie)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to delete selfie during enforceDailyLimit: ${selfie.id}", e)
-                        }
+        // A daily capture limit is a gate, never a retention policy.
+        if (getCountSince(dayStart) > limit) Log.w(TAG, "Daily limit exceeded without deleting archive")
+    }
+
+    suspend fun exportBackup(target: Uri) = withContext(Dispatchers.IO) {
+        val entries = selfieDao.getAllSelfies().first()
+        context.contentResolver.openOutputStream(target, "w")!!.use { raw ->
+            ZipOutputStream(raw).use { zip ->
+                zip.putNextEntry(ZipEntry("selfies.csv"))
+                zip.write("id,timestamp,latitude,longitude,favorite,note64,tags64,file\n".toByteArray())
+                entries.forEach { e ->
+                    val name = "photos/${e.id}.jpg"
+                    val line = listOf(e.id,e.timestamp,e.latitude?:"",e.longitude?:"",e.favorite,b64(e.note),b64(e.tags),name).joinToString(",")+"\n"
+                    zip.write(line.toByteArray())
+                }
+                zip.closeEntry()
+                entries.forEach { e ->
+                    val name = "photos/${e.id}.jpg"
+                    val input = e.mediaUri?.let { context.contentResolver.openInputStream(Uri.parse(it)) }
+                        ?: e.filePath.takeIf(String::isNotBlank)?.let { File(it).takeIf(File::isFile)?.inputStream() }
+                    input?.use {
+                        zip.putNextEntry(ZipEntry(name)); it.copyTo(zip, COPY_BUFFER_SIZE); zip.closeEntry()
                     }
                 }
             }
         }
     }
+
+    suspend fun importBackup(source: Uri): Int = withContext(Dispatchers.IO) {
+        data class Meta(val timestamp:Long,val lat:Double?,val lon:Double?,val favorite:Boolean,val note:String,val tags:String)
+        val meta=mutableMapOf<String,Meta>();var imported=0
+        context.contentResolver.openInputStream(source)!!.use { raw -> ZipInputStream(raw).use { zip ->
+            while(true){val entry=zip.nextEntry?:break
+                if(entry.name=="selfies.csv") zip.bufferedReader().readLines().drop(1).forEach{line->val p=line.split(',');if(p.size>=8)meta[p[7]]=Meta(p[1].toLong(),p[2].toDoubleOrNull(),p[3].toDoubleOrNull(),p[4].toBoolean(),unb64(p[5]),unb64(p[6]))}
+                else meta[entry.name]?.let { m -> if(selfieDao.countAt(m.timestamp)==0){val file=File(context.filesDir,"restore_${m.timestamp}.jpg");file.outputStream().use{zip.copyTo(it,COPY_BUFFER_SIZE)};selfieDao.insert(SelfieEntity(timestamp=m.timestamp,filePath=file.absolutePath,latitude=m.lat,longitude=m.lon,favorite=m.favorite,note=m.note,tags=m.tags));imported++} }
+                zip.closeEntry()
+            }
+        }}; imported
+    }
+    private fun b64(value:String)=Base64.encodeToString(value.toByteArray(),Base64.NO_WRAP)
+    private fun unb64(value:String)=String(Base64.decode(value,Base64.NO_WRAP))
 
     /**
      * Recovers unindexed private files, publishes them to MediaStore, verifies
@@ -341,5 +385,9 @@ class SelfieRepository(
         mediaUri = mediaUri,
         latitude = latitude,
         longitude = longitude
+        ,favorite = favorite,
+        note = note,
+        tags = tags,
+        trashedAt = trashedAt
     )
 }

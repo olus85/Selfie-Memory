@@ -9,11 +9,14 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import android.net.Uri
+import com.example.selfiememory.service.MemoryExporter
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ViewerViewModel @Inject constructor(
-    private val selfieRepository: SelfieRepository
+    private val selfieRepository: SelfieRepository,
+    private val exporter: MemoryExporter
 ) : ViewModel() {
 
     private val _selfieId = MutableStateFlow(0)
@@ -32,4 +35,8 @@ class ViewerViewModel @Inject constructor(
             selfieRepository.deleteSelfie(selfie)
         }
     }
+
+    fun setFavorite(selfie: Selfie) { viewModelScope.launch { selfieRepository.setFavorite(selfie.id, !selfie.favorite) } }
+    fun saveJournal(selfie: Selfie, note: String, tags: String) { viewModelScope.launch { selfieRepository.updateJournal(selfie.id, note, tags) } }
+    fun createComparison(a: Selfie, b: Selfie, done: (Uri?) -> Unit) { viewModelScope.launch { done(runCatching { exporter.collage(a,b) }.getOrNull()) } }
 }
