@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.selfiememory"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "3.0.1-debug"
+        versionCode = 8
+        versionName = "3.1.0-debug"
     }
 
     buildFeatures {
@@ -75,5 +75,6 @@ android {
 
         // Coil for image loading
         implementation("io.coil-kt:coil-compose:2.5.0")
+        implementation("androidx.exifinterface:exifinterface:1.3.7")
     }
 }

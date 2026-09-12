@@ -62,21 +62,40 @@ class CameraCapturer @Inject constructor(
                     // CameraX binding is not exposure readiness. Give 3A time to settle.
                     delay(CAMERA_WARMUP_MS)
                     val jpeg = takePicture(imageCapture)
-                    if (mirror && cameraType != CameraType.BACK) mirrorJpeg(jpeg) else jpeg
+                    normalizeJpeg(
+                        jpeg.bytes,
+                        jpeg.rotationDegrees,
+                        mirror && cameraType != CameraType.BACK
+                    )
                 } finally {
                     provider.unbindAll()
                 }
             }
         }
 
-    private suspend fun mirrorJpeg(bytes: ByteArray): ByteArray = withContext(Dispatchers.Default) {
+    private suspend fun normalizeJpeg(
+        bytes: ByteArray,
+        rotationDegrees: Int,
+        mirror: Boolean
+    ): ByteArray = withContext(Dispatchers.Default) {
+        if (rotationDegrees % 360 == 0 && !mirror) return@withContext bytes
         val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext bytes
-        val mirrored = android.graphics.Bitmap.createBitmap(source, 0, 0, source.width, source.height, Matrix().apply { setScale(-1f, 1f) }, true)
+        val matrix = Matrix().apply {
+            postRotate(rotationDegrees.toFloat())
+            if (mirror) postScale(-1f, 1f)
+        }
+        val normalized = android.graphics.Bitmap.createBitmap(
+            source, 0, 0, source.width, source.height, matrix, true
+        )
         ByteArrayOutputStream().use { out ->
-            mirrored.compress(android.graphics.Bitmap.CompressFormat.JPEG, 94, out)
-            if (mirrored !== source) mirrored.recycle(); source.recycle(); out.toByteArray()
+            normalized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 94, out)
+            if (normalized !== source) normalized.recycle()
+            source.recycle()
+            out.toByteArray()
         }
     }
+
+    private data class CapturedJpeg(val bytes: ByteArray, val rotationDegrees: Int)
 
     private suspend fun awaitCameraProvider(): ProcessCameraProvider = suspendCancellableCoroutine { continuation ->
         val future = ProcessCameraProvider.getInstance(context)
@@ -88,7 +107,7 @@ class CameraCapturer @Inject constructor(
         continuation.invokeOnCancellation { future.cancel(true) }
     }
 
-    private suspend fun takePicture(imageCapture: ImageCapture): ByteArray =
+    private suspend fun takePicture(imageCapture: ImageCapture): CapturedJpeg =
         suspendCancellableCoroutine { continuation ->
             imageCapture.takePicture(
                 ContextCompat.getMainExecutor(context),
@@ -98,7 +117,9 @@ class CameraCapturer @Inject constructor(
                             val buffer = image.planes[0].buffer
                             val bytes = ByteArray(buffer.remaining()).also { buffer.get(it) }
                             Log.i(TAG, "Image captured successfully, size=${bytes.size}")
-                            if (continuation.isActive) continuation.resume(bytes)
+                            if (continuation.isActive) continuation.resume(
+                                CapturedJpeg(bytes, image.imageInfo.rotationDegrees)
+                            )
                         } catch (error: Exception) {
                             if (continuation.isActive) continuation.resumeWithException(error)
                         } finally {

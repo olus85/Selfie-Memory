@@ -143,13 +143,14 @@ fun ViewerScreen(
             Box(Modifier.fillMaxSize().padding(padding)) {
                 if(compare && selfies.size>1){
                     val other=selfies.getOrNull((pagerState.currentPage+1).coerceAtMost(selfies.lastIndex))
-                    Row(Modifier.fillMaxSize()){listOf(current,other).forEach{item->item?.let{val source:Any=it.mediaUri?.let(Uri::parse)?:File(it.filePath);RotatedSelfieImage(source,"Vergleich",Modifier.weight(1f).fillMaxSize(),contentScale=ContentScale.Crop)}}}
+                    Row(Modifier.fillMaxSize()){listOf(current,other).forEach{item->item?.let{val source:Any=it.mediaUri?.let(Uri::parse)?:File(it.filePath);RotatedSelfieImage(source,"Vergleich",it.rotationDegrees,Modifier.weight(1f).fillMaxSize(),contentScale=ContentScale.Crop)}}}
                 } else HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
                     selfies.getOrNull(page)?.let { pageSelfie ->
                         val source: Any = pageSelfie.mediaUri?.let(Uri::parse) ?: File(pageSelfie.filePath)
                         RotatedSelfieImage(
                             model = source,
                             contentDescription = "Selfie",
+                            rotationDegrees = pageSelfie.rotationDegrees,
                             modifier = Modifier.fillMaxSize().graphicsLayer(
                                 scaleX = scale,
                                 scaleY = scale,

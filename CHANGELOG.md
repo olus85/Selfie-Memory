@@ -2,6 +2,16 @@
 
 All notable changes to **Selfie-Memory** are documented here.
 
+## [3.1.0-debug] - 2026-09-12
+
+### Fixed
+- Keep pre-3.0 photos upright and rotate only photos captured during the broken orientation window.
+- Preserve CameraX rotation while normalizing and mirroring every future JPEG.
+- Write YUV encoder planes using their real row and pixel strides to prevent corrupted video frames.
+
+### Added
+- Open every generated recap in an in-app video preview before the user chooses to share it.
+
 ## [3.0.1-debug] - 2026-09-12
 
 ### Fixed

@@ -15,5 +15,6 @@ data class SelfieEntity(
     val favorite: Boolean = false,
     val note: String = "",
     val tags: String = "",
-    val trashedAt: Long? = null
+    val trashedAt: Long? = null,
+    val rotationDegrees: Int = 0
 )

@@ -141,10 +141,10 @@ class SelfieRepository(
         context.contentResolver.openOutputStream(target, "w")!!.use { raw ->
             ZipOutputStream(raw).use { zip ->
                 zip.putNextEntry(ZipEntry("selfies.csv"))
-                zip.write("id,timestamp,latitude,longitude,favorite,note64,tags64,file\n".toByteArray())
+                zip.write("id,timestamp,latitude,longitude,favorite,note64,tags64,file,rotationDegrees\n".toByteArray())
                 entries.forEach { e ->
                     val name = "photos/${e.id}.jpg"
-                    val line = listOf(e.id,e.timestamp,e.latitude?:"",e.longitude?:"",e.favorite,b64(e.note),b64(e.tags),name).joinToString(",")+"\n"
+                    val line = listOf(e.id,e.timestamp,e.latitude?:"",e.longitude?:"",e.favorite,b64(e.note),b64(e.tags),name,e.rotationDegrees).joinToString(",")+"\n"
                     zip.write(line.toByteArray())
                 }
                 zip.closeEntry()
@@ -161,12 +161,12 @@ class SelfieRepository(
     }
 
     suspend fun importBackup(source: Uri): Int = withContext(Dispatchers.IO) {
-        data class Meta(val timestamp:Long,val lat:Double?,val lon:Double?,val favorite:Boolean,val note:String,val tags:String)
+        data class Meta(val timestamp:Long,val lat:Double?,val lon:Double?,val favorite:Boolean,val note:String,val tags:String,val rotationDegrees:Int)
         val meta=mutableMapOf<String,Meta>();var imported=0
         context.contentResolver.openInputStream(source)!!.use { raw -> ZipInputStream(raw).use { zip ->
             while(true){val entry=zip.nextEntry?:break
-                if(entry.name=="selfies.csv") zip.bufferedReader().readLines().drop(1).forEach{line->val p=line.split(',');if(p.size>=8)meta[p[7]]=Meta(p[1].toLong(),p[2].toDoubleOrNull(),p[3].toDoubleOrNull(),p[4].toBoolean(),unb64(p[5]),unb64(p[6]))}
-                else meta[entry.name]?.let { m -> if(selfieDao.countAt(m.timestamp)==0){val file=File(context.filesDir,"restore_${m.timestamp}.jpg");file.outputStream().use{zip.copyTo(it,COPY_BUFFER_SIZE)};selfieDao.insert(SelfieEntity(timestamp=m.timestamp,filePath=file.absolutePath,latitude=m.lat,longitude=m.lon,favorite=m.favorite,note=m.note,tags=m.tags));imported++} }
+                if(entry.name=="selfies.csv") zip.bufferedReader().readLines().drop(1).forEach{line->val p=line.split(',');if(p.size>=8)meta[p[7]]=Meta(p[1].toLong(),p[2].toDoubleOrNull(),p[3].toDoubleOrNull(),p[4].toBoolean(),unb64(p[5]),unb64(p[6]),p.getOrNull(8)?.toIntOrNull()?:0)}
+                else meta[entry.name]?.let { m -> if(selfieDao.countAt(m.timestamp)==0){val file=File(context.filesDir,"restore_${m.timestamp}.jpg");file.outputStream().use{zip.copyTo(it,COPY_BUFFER_SIZE)};selfieDao.insert(SelfieEntity(timestamp=m.timestamp,filePath=file.absolutePath,latitude=m.lat,longitude=m.lon,favorite=m.favorite,note=m.note,tags=m.tags,rotationDegrees=m.rotationDegrees));imported++} }
                 zip.closeEntry()
             }
         }}; imported
@@ -388,6 +388,7 @@ class SelfieRepository(
         ,favorite = favorite,
         note = note,
         tags = tags,
-        trashedAt = trashedAt
+        trashedAt = trashedAt,
+        rotationDegrees = rotationDegrees
     )
 }

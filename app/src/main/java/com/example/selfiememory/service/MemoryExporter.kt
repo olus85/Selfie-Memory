@@ -13,10 +13,12 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.media.Image
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
+import androidx.exifinterface.media.ExifInterface
 import com.example.selfiememory.domain.model.Selfie
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -126,36 +128,43 @@ class MemoryExporter @Inject constructor(
                 }
             }
 
-            fun queue(bytes: ByteArray, timestampUs: Long, flags: Int = 0) {
+            fun nextInputBuffer(): Int {
                 var attempts = 0
                 while (true) {
                     val index = codec.dequeueInputBuffer(10_000)
-                    if (index >= 0) {
-                        codec.getInputBuffer(index)!!.apply {
-                            clear()
-                            check(capacity() >= bytes.size) { "Encoderpuffer ist zu klein" }
-                            put(bytes)
-                        }
-                        codec.queueInputBuffer(index, 0, bytes.size, timestampUs, flags)
-                        return
-                    }
+                    if (index >= 0) return index
                     drain(false)
                     check(++attempts < 300) { "Kein freier Video-Encoderpuffer" }
                 }
             }
 
+            fun queueFrame(frame: YuvFrame, timestampUs: Long) {
+                val index = nextInputBuffer()
+                val bufferSize = codec.getInputBuffer(index)?.capacity()
+                    ?: error("Encoderpuffer fehlt")
+                val image = codec.getInputImage(index)
+                    ?: error("Encoder stellt keinen stride-sicheren YUV-Puffer bereit")
+                fillInputImage(image, frame)
+                codec.queueInputBuffer(index, 0, bufferSize, timestampUs, 0)
+            }
+
+            fun queueEnd(timestampUs: Long) {
+                val index = nextInputBuffer()
+                codec.queueInputBuffer(index, 0, 0, timestampUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            }
+
             var frame = 0L
             chosen.forEach { selfie ->
                 val rendered = renderFrame(loadRotated(selfie), selfie.timestamp)
-                val yuv = toI420(rendered)
+                val yuv = toYuvFrame(rendered)
                 rendered.recycle()
                 repeat(VIDEO_FPS * SECONDS_PER_PHOTO) {
-                    queue(yuv, frame * 1_000_000L / VIDEO_FPS)
+                    queueFrame(yuv, frame * 1_000_000L / VIDEO_FPS)
                     frame++
                     drain(false)
                 }
             }
-            queue(ByteArray(0), frame * 1_000_000L / VIDEO_FPS, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            queueEnd(frame * 1_000_000L / VIDEO_FPS)
             check(drain(true)) { "Video wurde nicht abgeschlossen" }
             check(muxerStarted) { "Video enthält keine Spur" }
             muxer.stop()
@@ -178,22 +187,29 @@ class MemoryExporter @Inject constructor(
     }
 
     private fun loadRotated(selfie: Selfie): Bitmap {
-        val stream = selfie.mediaUri
-            ?.let { context.contentResolver.openInputStream(Uri.parse(it)) }
-            ?: File(selfie.filePath).inputStream()
+        val exifRotation = runCatching {
+            openSelfie(selfie).use { ExifInterface(it).rotationDegrees }
+        }.getOrDefault(0)
+        val stream = openSelfie(selfie)
         val source = stream.use { BitmapFactory.decodeStream(it) } ?: error("Foto nicht lesbar")
+        val rotation = (exifRotation + selfie.rotationDegrees) % 360
+        if (rotation == 0) return source
         val rotated = Bitmap.createBitmap(
             source,
             0,
             0,
             source.width,
             source.height,
-            Matrix().apply { postRotate(90f) },
+            Matrix().apply { postRotate(rotation.toFloat()) },
             true
         )
         if (rotated !== source) source.recycle()
         return rotated
     }
+
+    private fun openSelfie(selfie: Selfie) = selfie.mediaUri
+        ?.let { context.contentResolver.openInputStream(Uri.parse(it)) }
+        ?: File(selfie.filePath).inputStream()
 
     private fun renderFrame(source: Bitmap, timestamp: Long): Bitmap {
         val output = Bitmap.createBitmap(VIDEO_WIDTH, VIDEO_HEIGHT, Bitmap.Config.ARGB_8888)
@@ -230,32 +246,69 @@ class MemoryExporter @Inject constructor(
         bitmap.recycle()
     }
 
-    private fun toI420(bitmap: Bitmap): ByteArray {
+    private data class YuvFrame(
+        val width: Int,
+        val height: Int,
+        val y: ByteArray,
+        val u: ByteArray,
+        val v: ByteArray
+    )
+
+    private fun toYuvFrame(bitmap: Bitmap): YuvFrame {
         val width = bitmap.width
         val height = bitmap.height
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-        val output = ByteArray(width * height * 3 / 2)
+        val yPlane = ByteArray(width * height)
+        val uPlane = ByteArray(width * height / 4)
+        val vPlane = ByteArray(width * height / 4)
         var yIndex = 0
-        var uIndex = width * height
-        var vIndex = uIndex + width * height / 4
+        var chromaIndex = 0
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val color = pixels[y * width + x]
                 val red = Color.red(color)
                 val green = Color.green(color)
                 val blue = Color.blue(color)
-                output[yIndex++] = (((66 * red + 129 * green + 25 * blue + 128) shr 8) + 16)
+                yPlane[yIndex++] = (((66 * red + 129 * green + 25 * blue + 128) shr 8) + 16)
                     .coerceIn(0, 255).toByte()
                 if (y % 2 == 0 && x % 2 == 0) {
-                    output[uIndex++] = (((-38 * red - 74 * green + 112 * blue + 128) shr 8) + 128)
+                    uPlane[chromaIndex] = (((-38 * red - 74 * green + 112 * blue + 128) shr 8) + 128)
                         .coerceIn(0, 255).toByte()
-                    output[vIndex++] = (((112 * red - 94 * green - 18 * blue + 128) shr 8) + 128)
+                    vPlane[chromaIndex] = (((112 * red - 94 * green - 18 * blue + 128) shr 8) + 128)
                         .coerceIn(0, 255).toByte()
+                    chromaIndex++
                 }
             }
         }
-        return output
+        return YuvFrame(width, height, yPlane, uPlane, vPlane)
+    }
+
+    private fun fillInputImage(image: Image, frame: YuvFrame) {
+        check(image.planes.size == 3) { "Unerwartetes YUV-Format" }
+        fillPlane(image.planes[0], frame.y, frame.width, frame.height, 16.toByte())
+        fillPlane(image.planes[1], frame.u, frame.width / 2, frame.height / 2, 128.toByte())
+        fillPlane(image.planes[2], frame.v, frame.width / 2, frame.height / 2, 128.toByte())
+    }
+
+    private fun fillPlane(
+        plane: Image.Plane,
+        source: ByteArray,
+        width: Int,
+        height: Int,
+        padding: Byte
+    ) {
+        val buffer = plane.buffer
+        for (index in 0 until buffer.capacity()) buffer.put(index, padding)
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        for (row in 0 until height) {
+            for (column in 0 until width) {
+                val target = row * rowStride + column * pixelStride
+                check(target < buffer.capacity()) { "YUV-Ebene ist kleiner als erwartet" }
+                buffer.put(target, source[row * width + column])
+            }
+        }
     }
 
     private fun createImage(name: String): Uri = context.contentResolver.insert(

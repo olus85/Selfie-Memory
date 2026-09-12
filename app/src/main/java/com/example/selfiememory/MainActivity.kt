@@ -21,6 +21,7 @@ import com.example.selfiememory.ui.navigation.Screen
 import com.example.selfiememory.ui.settings.SettingsScreen
 import com.example.selfiememory.ui.theme.SelfieMemoryTheme
 import com.example.selfiememory.ui.viewer.ViewerScreen
+import com.example.selfiememory.ui.video.VideoPreviewScreen
 import com.example.selfiememory.service.SelfieCaptureService
 import com.example.selfiememory.data.repository.SettingsRepository
 import androidx.lifecycle.lifecycleScope
@@ -72,6 +73,9 @@ class MainActivity : FragmentActivity() {
                                 },
                                 onNavigateToViewer = { selfieId ->
                                     navController.navigate(Screen.Viewer.createRoute(selfieId))
+                                },
+                                onVideoReady = { uri ->
+                                    navController.navigate(Screen.VideoPreview.createRoute(uri))
                                 }
                             )
                         }
@@ -97,6 +101,13 @@ class MainActivity : FragmentActivity() {
                                     }
                                 )
                             }
+                        }
+
+                        composable(Screen.VideoPreview.route) { backStackEntry ->
+                            val encoded = backStackEntry.arguments?.getString("videoUri")
+                            val videoUri = encoded?.let { android.net.Uri.parse(android.net.Uri.decode(it)) }
+                            if (videoUri == null) navController.popBackStack()
+                            else VideoPreviewScreen(videoUri) { navController.popBackStack() }
                         }
                     }
                     }

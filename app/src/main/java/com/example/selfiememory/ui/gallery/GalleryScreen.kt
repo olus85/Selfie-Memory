@@ -1,6 +1,5 @@
 package com.example.selfiememory.ui.gallery
 
-import android.content.ClipData
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,13 +23,11 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Star
-import android.content.Intent
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.FilterChip
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -67,11 +64,12 @@ import java.util.Locale
 fun GalleryScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToViewer: (Int) -> Unit,
+    onVideoReady: (Uri) -> Unit,
     viewModel: GalleryViewModel = hiltViewModel()
 ) {
     val selfies by viewModel.selfies.collectAsState()
     val exporting by viewModel.exporting.collectAsState()
-    val settings by viewModel.settings.collectAsState();val context=LocalContext.current
+    val settings by viewModel.settings.collectAsState()
     var query by remember{mutableStateOf("")};var favorites by remember{mutableStateOf(false)};var trash by remember{mutableStateOf(false)};var exportMessage by remember{mutableStateOf<String?>(null)}
     Scaffold(
         topBar = {
@@ -93,16 +91,7 @@ fun GalleryScreen(
                         exportMessage = null
                         viewModel.monthlyVideo { uri, error ->
                             exportMessage = error
-                            if (uri != null) {
-                                val intent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "video/mp4"
-                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                    putExtra(Intent.EXTRA_TITLE, "Selfie-Memory-Monatsrückblick.mp4")
-                                    clipData = ClipData.newUri(context.contentResolver, "Selfie-Memory-Monatsrückblick.mp4", uri)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(Intent.createChooser(intent, "Monatsrückblick teilen"))
-                            }
+                            if (uri != null) onVideoReady(uri)
                         }
                     }) {
                         if (exporting) CircularProgressIndicator()
@@ -179,7 +168,7 @@ private fun MemoryTile(selfie: Selfie, onClick: () -> Unit) {
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Box(Modifier.fillMaxSize()) {
-            RotatedSelfieImage(source, "Selfie", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            RotatedSelfieImage(source, "Selfie", selfie.rotationDegrees, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Box(
                 Modifier.fillMaxWidth().align(Alignment.BottomCenter).background(
                     Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color.Transparent, androidx.compose.ui.graphics.Color.Black.copy(alpha = .68f)))

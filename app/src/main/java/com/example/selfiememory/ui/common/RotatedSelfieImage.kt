@@ -12,8 +12,8 @@ import coil.request.ImageRequest
 import coil.size.Size
 import coil.transform.Transformation
 
-private object RotateClockwise90 : Transformation {
-    override val cacheKey = "selfie-clockwise-90-v1"
+private class RotateTransformation(private val degrees: Int) : Transformation {
+    override val cacheKey = "selfie-rotation-$degrees-v2"
 
     override suspend fun transform(input: Bitmap, size: Size): Bitmap =
         Bitmap.createBitmap(
@@ -22,7 +22,7 @@ private object RotateClockwise90 : Transformation {
             0,
             input.width,
             input.height,
-            Matrix().apply { postRotate(90f) },
+            Matrix().apply { postRotate(degrees.toFloat()) },
             true
         )
 }
@@ -31,15 +31,17 @@ private object RotateClockwise90 : Transformation {
 fun RotatedSelfieImage(
     model: Any,
     contentDescription: String?,
+    rotationDegrees: Int,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit
 ) {
     val context = LocalContext.current
-    val request = remember(model) {
-        ImageRequest.Builder(context)
-            .data(model)
-            .transformations(RotateClockwise90)
-            .build()
+    val request = remember(model, rotationDegrees) {
+        ImageRequest.Builder(context).data(model).apply {
+            if (rotationDegrees % 360 != 0) {
+                transformations(RotateTransformation(rotationDegrees))
+            }
+        }.build()
     }
     AsyncImage(
         model = request,
